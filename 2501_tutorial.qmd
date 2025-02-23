@@ -10,13 +10,15 @@ eval: false
 
 Data repository from NCBI with functional genomic data.
 
+## 1. Definitions
+
 -   Platform: an array or sequencer.
 -   Sample: sample source, protocols used, and expression data.
 -   Series: related samples.
 -   DataSet: curated collection of biologically and statistically comparable GEO Samples.
 -   Profile: expression measurements for an individual gene across all Samples in a DataSet.
 
-## 1. Datasets structure
+## 2. Datasets structure
 
 -   assayData: raw or processed intensities (samples in columns).
 -   phenoData: metadata (samples in rows).
@@ -25,7 +27,7 @@ Data repository from NCBI with functional genomic data.
 
 ![\[1\]: Figure from Greg Tucker-Kellogg](images/ExpressionSet.png)
 
-### GEO Files
+## 3. GEO Files
 
 -   SOFT: information about the experiment (MIAME), estimates for each gene, transcript.
 -   MINiML: XML format.
@@ -36,7 +38,7 @@ Data repository from NCBI with functional genomic data.
 
 ![\[2\]: GSE55851](images/paste-1.png)
 
-## 3. Normalisation
+## 4. Normalisation
 
 ### Affymetrix
 
@@ -48,9 +50,9 @@ AffyBatch -\> ExpressionSet
 -   Normalisation:  quantile normalisation, data on a common empirical distribution
 -   Summarisation
 
+## Tutorials
 
-## 1. Loading packages
-
+### 1. Loading packages
 ```{r}
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
@@ -65,8 +67,7 @@ pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma)
 # for vscode: pip3 install -U radian
 ```
 
-## 1.X Assuming everything is fine
-
+### 2. Scenario A: Assuming everything is fine
 ```{r}
 htlv_id = "GSE55851"
 htlv_tempdir=".temp/"
