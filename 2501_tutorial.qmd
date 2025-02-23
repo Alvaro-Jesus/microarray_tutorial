@@ -1,0 +1,260 @@
+---
+title: "GEO"
+format: html
+editor: visual
+echo: false
+eval: false
+---
+
+# GEO - Gene Expression Omnibus (GEO)
+
+Data repository from NCBI with functional genomic data.
+
+-   Platform: an array or sequencer.
+-   Sample: sample source, protocols used, and expression data.
+-   Series: related samples.
+-   DataSet: curated collection of biologically and statistically comparable GEO Samples.
+-   Profile: expression measurements for an individual gene across all Samples in a DataSet.
+
+## 1. Datasets structure
+
+-   assayData: raw or processed intensities (samples in columns).
+-   phenoData: metadata (samples in rows).
+-   featureData: annotation.
+-   annotation: platform name.
+
+![\[1\]: Figure from Greg Tucker-Kellogg](images/ExpressionSet.png)
+
+### GEO Files
+
+-   SOFT: information about the experiment (MIAME), estimates for each gene, transcript.
+-   MINiML: XML format.
+-   Series matrix file: directly to a spreadsheet.
+-   \`.CEL\` (Supplemental files): Original, unprocessed data.
+-   GSE object: sample(GSM, GSMList) + platform(GPL, GPLList)
+-   \`GDS2eSet\` ExpressionSet with processed data.
+
+## 1. Loading packages
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("GEOquery")
+BiocManager::install("limma")
+BiocManager::install("pheatmap")
+BiocManager::install("org.Hs.eg.db")
+pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, pheatmap, org.Hs.eg.db)
+
+# tips: browseVignettes('packagename')
+# tips: methods(class=class(foo))
+```
+
+```{r}
+# Fastest approach assuming the counts doesnt contain errors 
+
+htlv_id = "GSE34870"
+htlv_tempdir="/Users/denriquez/Documents/tempdev"
+gse = getGEO(
+  htlv_id, 
+  GSEMatrix=TRUE, 
+  destdir=htlv_tempdir
+  )
+
+# To know about the processing or normalization (Affymetrix or Agilent)
+gse[[1]]$data_processing
+gse[[1]]$platform_id
+
+# Exploring
+class(gse)
+methods(class=class(gse))
+length(gse)
+
+# Subsetting to 1
+GSE34870<-gse[[1]]
+
+# Exploring
+class(GSE34870)
+methods(class=class(GSE34870))
+
+# Exploring more
+pData(GSE34870)[1:46,] # Data information or Phenotype data
+
+fData(GSE34870) # Gene annotation
+
+exprs(GSE34870)[1,] # Expression data
+
+varLabels(GSE34870) # Metadata
+
+GSE34870$supplementary_file #Raw files
+
+annotation(GSE34870) # Chip information
+
+experimentData(GSE34870) #Experimental info
+
+featureData(GSE34870) #Probeset data
+
+#To check if raw data matchs with metadata
+pd <-pData(GSE34870)
+pd['supp_name'] <- str_split(pd$supplementary_file,"/") |>
+  map_chr(tail,1)
+pd['supp_name'] 
+
+```
+
+## 3. Normalisation
+
+### Affymetrix
+
+RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the last step.
+
+AffyBatch -\> ExpressionSet
+
+-   Background correction
+-   Normalisation
+-   Summarisation
+
+```{r}
+pData(gse)$data_processing[1] 
+
+summary(exprs(gse)) # rarely more than 16
+# exprs(gse) <- log2(exprs(gse))
+
+boxplot(exprs(gse),outline=F)
+```
+
+## 4. Linear models
+
+Generate a model to specify the design and fit the model to the design.
+
+`y ~ x + 0`: The "0" will remove the intercept.
+
+```{r}
+library(limma)
+
+design_htlv <- model.matrix( ~ GSE34870[['cell line:ch1']])
+colnames(design_htlv)[2] <- "model_htlv"
+
+# To check our model
+design_htlv
+
+# Fit a linear model 
+fit_htlv <-lmFit(GSE34870, design_htlv)
+
+# Empirical Bayes correction in limma: distribution across genes to calculate a robust test statistic
+fitted.ebayes <- eBayes(fit_htlv)
+
+# Extracting DE genes
+topTable(fitted.ebayes)
+
+# Decide test - which features pass the test criteria (Benjamini-Hochberg p=0.05, no log fold change cutoff)
+
+summary(decideTests(fitted.ebayes[, "model_htlv"], lcf=1))
+```
+
+## 5. Data wrangling
+
+```{r}
+sample_info = pData(gse)
+head(sample_info, n=20)
+
+sample_wt = sample_info |>
+  select(characteristics_ch1, characteristics_ch1.2) |>
+  filter(characteristics_ch1.2=="treatment: untreated for 6 hours")
+```
+
+```{r}
+library(stringr)
+
+sample_wt$group <- ""
+for(i in 1:nrow(sample_wt)){
+  if(str_detect(sample_wt$characteristics_ch1[i], "MT-2")){sample_wt$group[i] <- "MT-2"}
+  if(str_detect(sample_wt$characteristics_ch1[i], "MT-4")){sample_wt$group[i] <- "MT-4"}
+  
+}
+
+```
+
+## 6. Sample clustering and exploratory PCA
+
+```{r}
+library(pheatmap)
+## argument use="c" stops an error if there are any missing data points
+
+corMatrix <- cor(exprs(gse),use="c")
+pheatmap(corMatrix) 
+
+colnames(corMatrix)
+rownames(sample_info)
+# Supplementary files (AGILENT)
+filePaths <- getGEOSuppFiles("GSE34870") # this may fail
+
+gse <- gse[[1]]
+for (i in 1:length(gse$supplementary_file)) {
+  url <- gse$supplementary_file[i]
+  destfile <- file.path(htlv_tempdir, basename(url))
+  # Download the file
+  #download.file(url, destfile, mode = "wb")
+  download.file(url, destfile, mode = "wb", method = "curl")
+  #system(paste("wget -O", destfile, url))
+  # Extract the tar file if it's a tar archive
+  #untar(destfile, exdir = htlv_tempdir)
+}
+
+
+
+
+
+
+
+
+
+
+pd <- pData(gse)
+pd['cel_file'] <- str_split(pd$supplementary_file,"/") |>
+  map_chr(tail,1)
+
+
+pacman::p_load(oligo)
+pacman::p_load(oligoClasses)
+
+GSE34870_celdata <- read.celfiles(list.celfiles('htlv_id',full.names=TRUE,listGzipped=TRUE))
+
+```
+
+```{r}
+htlv_id = "GSE34870"
+gse = getGEO(htlv_id, GSEMatrix=FALSE) # parse the SOFT (less errors and more info, also locally filename="*.soft")
+
+# Exploring
+class(gse)
+methods(class=class(gse))
+names(GSMList(gse))
+names(Meta(gse))
+names(GPLList(gse))
+
+
+
+
+
+
+
+
+### CEL files for raw data (FeatureSet)
+filePaths <- getGEOSuppFiles('GSE34870')
+library(oligo)
+library(oligoClasses)
+gse33146_celdata <- read.celfiles(list.celfiles('GSE33146',full.names=TRUE,listGzipped=TRUE))
+image(gse33146_celdata[,1])
+
+```
+
+## Further Info
+
+-   (Tutorial by Mark Dunning)\[https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html\]
+
+-   (Tutorial by Lindseynicer)\[https://github.com/Lindseynicer/How-to-analyze-GEO-microarray-data\]
+
+-   (Repository in Spanish)\[https://github.com/u-genoma/BioinfinvRepro\]
+
+-   (Deeply explained)\[https://gtk-teaching.github.io/Microarrays-R/\]
