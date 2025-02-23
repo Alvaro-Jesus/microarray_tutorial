@@ -30,77 +30,11 @@ Data repository from NCBI with functional genomic data.
 -   SOFT: information about the experiment (MIAME), estimates for each gene, transcript.
 -   MINiML: XML format.
 -   Series matrix file: directly to a spreadsheet.
--   \`.CEL\` (Supplemental files): Original, unprocessed data.
+-   `.CEL` (Supplemental files): Original, unprocessed data.
 -   GSE object: sample(GSM, GSMList) + platform(GPL, GPLList)
--   \`GDS2eSet\` ExpressionSet with processed data.
+-   `GDS2eSet` ExpressionSet with processed data.
 
-## 1. Loading packages
-
-```{r}
-if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("GEOquery")
-BiocManager::install("limma")
-BiocManager::install("pheatmap")
-BiocManager::install("org.Hs.eg.db")
-pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, pheatmap, org.Hs.eg.db)
-
-# tips: browseVignettes('packagename')
-# tips: methods(class=class(foo))
-```
-
-```{r}
-# Fastest approach assuming the counts doesnt contain errors 
-
-htlv_id = "GSE34870"
-htlv_tempdir="/Users/denriquez/Documents/tempdev"
-gse = getGEO(
-  htlv_id, 
-  GSEMatrix=TRUE, 
-  destdir=htlv_tempdir
-  )
-
-# To know about the processing or normalization (Affymetrix or Agilent)
-gse[[1]]$data_processing
-gse[[1]]$platform_id
-
-# Exploring
-class(gse)
-methods(class=class(gse))
-length(gse)
-
-# Subsetting to 1
-GSE34870<-gse[[1]]
-
-# Exploring
-class(GSE34870)
-methods(class=class(GSE34870))
-
-# Exploring more
-pData(GSE34870)[1:46,] # Data information or Phenotype data
-
-fData(GSE34870) # Gene annotation
-
-exprs(GSE34870)[1,] # Expression data
-
-varLabels(GSE34870) # Metadata
-
-GSE34870$supplementary_file #Raw files
-
-annotation(GSE34870) # Chip information
-
-experimentData(GSE34870) #Experimental info
-
-featureData(GSE34870) #Probeset data
-
-#To check if raw data matchs with metadata
-pd <-pData(GSE34870)
-pd['supp_name'] <- str_split(pd$supplementary_file,"/") |>
-  map_chr(tail,1)
-pd['supp_name'] 
-
-```
+![\[2\]: GSE55851](images/paste-1.png)
 
 ## 3. Normalisation
 
@@ -110,16 +44,242 @@ RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the la
 
 AffyBatch -\> ExpressionSet
 
--   Background correction
--   Normalisation
+-   Background correction: removal of background noise (probe pairs, a perfect match (PM), andsingle base mismatch (MM): Affymetrix’s own MAS5 algorithm, RMA ALGORITHM, gcrma algorithm)
+-   Normalisation:  quantile normalisation, data on a common empirical distribution
 -   Summarisation
 
+
+## 1. Loading packages
+
 ```{r}
-pData(gse)$data_processing[1] 
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
-summary(exprs(gse)) # rarely more than 16
+BiocManager::install("GEOquery")
+BiocManager::install("limma")
+pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma)
+
+# tips: browseVignettes('packagename')
+# tips: methods(class=class(foo))
+# for vscode: install.packages("httpgd")
+# for vscode: pip3 install -U radian
+```
+
+## 1.X Assuming everything is fine
+
+```{r}
+htlv_id = "GSE55851"
+htlv_tempdir=".temp/"
+
+# obtaining processed data
+gse2 = getGEO(
+  htlv_id, 
+  GSEMatrix=TRUE, 
+  destdir=htlv_tempdir)
+
+# number of platforms
+length(gse2)
+gse2 <- gse2[[1]]
+pData(gse2) # Sampledata
+fData(gse2) # gene annotation
+exprs(gse2) # expression data
+
+
+
+head(pData(gse2))
+colnames(pData(gse2))
+gse2@annotation
+
+# extract relevant data
+pinfo = pData(gse2) |>
+  dplyr::rename(typex="characteristics_ch1.1", age="characteristics_ch1.2", gender="characteristics_ch1.3") |>
+  dplyr::select(typex, age, gender) |>
+  dplyr::mutate(across(everything(), ~ sub(".*: ", "", .)))
+pinfo$ID <- rownames(pinfo)
+pinfo
+
+# Check if normalised
+boxplot(log2(exprs(gse2)), outline=F) #not normalised
+#Unsupervised clustering (understand the sources of variation and outliers)
+pacman::p_load(pheatmap, tidyverse, ggrepel, tidyplots)
+
+rownames(pinfo) <- colnames(cor(exprs(gse2), use="c"))
+table(rownames(pinfo), pinfo$ID)
+pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo) #c stops if any missing data point
+
+# PCA - mandatory to transpose
+pca <- prcomp(t(exprs(gse2)))
+
+cbind(pinfo, pca$x) |>
+tidyplot(x=PC1, y=PC2, col=typex, label=age, shape=gender) |>
+add_data_points(rasterize = FALSE, rasterize_dpi = 300) |>
+add_data_labels_repel() |>
+adjust_size(width = 100, height = 100, unit = "mm")
+
+#remove outliers: gse <- gse[,-outlier_samples]
+#---- Normalisation
+# Load required libraries
+library(limma)
+
+# Step 2: Background correction
+agilent_data_bg <- backgroundCorrect(exprs(gse2), method = "rma")
+
+# Step 3: Within-array normalization (Loess)
+agilent_data_norm <- normalizeWithinArrays(agilent_data_bg, method = "loess")
+
+# Step 4: Between-array normalization (Quantile)
+agilent_data_norm <- normalizeBetweenArrays(agilent_data_norm, method = "quantile")
+
+# Step 5: Log2 transformation
+agilent_data_log <- log2(agilent_data_norm$M)
+
+# Step 6: Save normalized data
+write.table(agilent_data_log, file = "normalized_data.txt", sep = "\t", quote = FALSE)
+```
+
+```{r}
+# Option A: Retrieving GSE objects
+
+htlv_id = "GSE55851"
+htlv_tempdir=".temp/"
+gse = getGEO(
+  htlv_id, 
+  GSEMatrix=FALSE, #parse SOFT (more information, less errors, slower)
+  destdir=htlv_tempdir)
+methods(class=class(gse))
+Meta(gse)
+#methods
+length(gse)
+class(gse)
+methods(class=class(gse) #GPLList + GSMList + Metadata
+names(GSMList(gse))
+names(GPLList(gse))
+
+# Option B: Retrieving ExpressionSet objects (Geo dataset)
+gse2 = getGEO(
+  htlv_id, 
+  GSEMatrix=TRUE, 
+  destdir=htlv_tempdir)
+
+gse2[[1]]$data_processing
+gse2[[1]]$platform_id
+
+# Exploring
+class(gse2)
+methods(class=class(gse2))
+length(gse2)
+
+# Subsetting to 1
+GSE55851<-gse2[[1]]
+
+# Exploring
+class(GSE55851)
+methods(class=class(GSE55851))
+length(GSE55851)
+varLabels(GSE55851)
+GSE55851$supplementary_file
+
+pd <- pData(GSE55851)
+pd["cel_file"] <- str_split(GSE55851$supplementary_file, "/") |> map_chr(tail,1)
+pd["cel_file"]
+
+# Option C: raw files mostly for affymetryx, ExpressionFeatureSet or genefeatureset
+getGEOSuppFiles('GSE55851',makeDirectory = TRUE, baseDir = "./.temp")
+library(oligo)
+library(oligoClasses)
+
+# Check the platform (GPL) number
+Meta(gse)$platform_id
+
+# Agilent: single vs double channel (green and red)
+library(limma)
+# Step 1: Load Agilent data
+files <- list.files("path/to/Agilent/files", pattern = "*.txt", full.names = TRUE)
+agilent_data <- read.maimages(files, source = "agilent", green.only = TRUE)
+
+#or
+
+files <- list.files("GSE55851/GSE55851_RAW/", pattern = "^GSM.*.txt.gz", full.names = TRUE)
+files
+# Read the Agilent files
+agilent_data <- read.maimages(files, source="agilent", columns=list(G = "gMedianSignal"), green.only=TRUE)
+agilent_data
+agilent_data$targets
+
+#If affymetrix
+gse55851_celdata <- read.celfiles(paste0('GSE55851/GSE55851_RAW/',pd$cel_file),phenoData=phenoData(gse2))
+pData(gse55851_celdata)[,c("geo_accession", "cell type:ch1", "treatment_ch1")]
+varLabels(gse2)
+
+```
+
+```{r}
+# Ultimate example
+htlv_id = "GSE46518"
+# Obtain the processed data
+gse_GSE46518 = getGEO(
+  htlv_id, 
+  GSEMatrix=TRUE, 
+  destdir="./.temp")
+gse_GSE46518[[1]]$supplementary_file
+
+#Obtain data and attach to supp files
+pd <- pData(gse_GSE46518[[1]])
+pd["cel_file"] <- str_split(gse_GSE46518[[1]]$supplementary_file, "/") |> map_chr(tail,1)
+pd["cel_file"]
+
+#Download raw data
+getGEOSuppFiles('GSE46518',makeDirectory = TRUE, baseDir = ".temp/")
+# Another download option
+gse46518 = "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE46518&format=file"
+
+pacman::p_load(curl)
+curl_download(gse46518, destfile = "./.temp/GSE46518_RAW.tar")
+
+# Untar
+untar(".temp/GSE46518_RAW.tar", exdir = "./GSE46518")
+
+# Read CEL files
+library(Biobase)  # Required for AnnotatedDataFrame
+# Convert the data.frame to an AnnotatedDataFrame
+gsepd<- AnnotatedDataFrame(pData(gse_GSE46518[[1]]))
+GSE46518_celdata <- read.celfiles(paste0('GSE46518/',pd$cel_file),phenoData=gsepd)
+
+varLabels(GSE46518_celdata)
+pData(GSE46518_celdata)[,c("geo_accession", "infection:ch1")]
+
+hist(GSE46518_celdata, target="core")
+
+## RMA
+GSE46518_set <- rma(GSE46518_celdata)
+hist(GSE46518_set, target="core")
+
+## gcrma, when concern about GC content, affymetryx and low levels
+pacman::p_load(gcrma)
+GSE46518_gcrma <- gcrma(GSE46518_celdata)
+```
+```{r}
+# Exploring ExpressionSet
+pData(GSE55851)[1:5,] # Data information or Phenotype data
+fData(GSE55851) # Gene annotation
+exprs(GSE55851)[1,] # Expression data
+varLabels(GSE55851) # Metadata
+GSE55851$supplementary_file #Raw files
+annotation(GSE55851) # Chip information
+experimentData(GSE55851) #Experimental info
+featureData(GSE55851) #Probeset data
+#To check if raw data matchs with metadata
+pdcheck <-pData(GSE55851)
+pdcheck['supp_name'] <- str_split(pdcheck$supplementary_file,"/") |>
+  map_chr(tail,1)
+pdcheck['supp_name'] 
+```
+
+
+```{r}
+pData(GSE46518_celdata)$data_processing[1] 
+summary(exprs(GSE46518_celdata)) # rarely more than 16
 # exprs(gse) <- log2(exprs(gse))
-
 boxplot(exprs(gse),outline=F)
 ```
 
@@ -132,14 +292,14 @@ Generate a model to specify the design and fit the model to the design.
 ```{r}
 library(limma)
 
-design_htlv <- model.matrix( ~ GSE34870[['cell line:ch1']])
+design_htlv <- model.matrix( ~ GSE46518_celdata[["infection:ch1"]])
 colnames(design_htlv)[2] <- "model_htlv"
 
 # To check our model
 design_htlv
 
 # Fit a linear model 
-fit_htlv <-lmFit(GSE34870, design_htlv)
+fit_htlv <-lmFit(GSE46518_set, design_htlv)
 
 # Empirical Bayes correction in limma: distribution across genes to calculate a robust test statistic
 fitted.ebayes <- eBayes(fit_htlv)
@@ -150,12 +310,84 @@ topTable(fitted.ebayes)
 # Decide test - which features pass the test criteria (Benjamini-Hochberg p=0.05, no log fold change cutoff)
 
 summary(decideTests(fitted.ebayes[, "model_htlv"], lcf=1))
+
+GSE46518_ex_values <- exprs(GSE46518_celdata)
+fData(GSE46518_celdata)
+# Define probe set IDs for sex-specific genes
+sex_genes <- c("220729_s_at", "205000_at", "205038_at", "205040_at")
+sex_gene_expression <- GSE46518_ex_values[sex_genes, ]
+head(GSE46518_ex_values)
+
+annotation(GSE46518_celdata)
+featureNames(GSE46518_celdata)
+gse_GSE46518
+gpl <- getGEO("GPL5175")
+anno_table <- Table(gpl)
+head(anno_table)
+
 ```
 
+c("XIST: 220729_s_at (Affymetrix Human Genome U133 Plus 2.0 Array)
+RPS4Y1: 205000_at
+KDM5D: 205038_at
+DDX3Y: 205040_at
+
+```{r}
+#vector of sex genes
+sex = c("XIST", "RPS4Y1", "KDM5D", "DDX3Y")
+
+## table
+str(anno_table)
+selected_rows <- anno_table[grep("DDX3Y|KDM5D|RPS4Y1|XIST", anno_table$mrna_assignment, ignore.case = TRUE), ]
+
+sex_id = selected_rows$ID
+
+sex_id
+
+###
+head(GSE46518_ex_values)
+# Install required packages if not already installed
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+if (!require("pd.huex.1.0.st.v2", quietly = TRUE)) 
+  BiocManager::install("pd.huex.1.0.st.v2")
+
+# Load the required libraries
+library(pd.huex.1.0.st.v2)
+library(AnnotationDbi)
+
+# Create the annotation database object
+huex_annot <- pd.huex.1.0.st.v2
+
+getdb(huex_annot)
+methods(class=class(huex_annot))
+str(huex_annot)
+# Get probe IDs using the correct method
+pkgenv <- as.env(huex_annot)
+
+# Function to retrieve annotations
+get_probe_annotation <- function(probe_ids) {
+  annotations <- select(huex_annot, 
+                       keys = probe_ids,
+                       columns = c("PROBEID", "SYMBOL", "GENENAME", "ENTREZID", "ENSEMBL"),
+                       keytype = "PROBEID")
+  return(annotations)
+}
+
+# Example usage:
+# Replace with your specific probe IDs of interest
+probe_ids <- head(available_keys, 10)
+annotations <- get_probe_annotation(probe_ids)
+print(annotations)
+
+# To see all available annotation types:
+print(available_columns)
+```
 ## 5. Data wrangling
 
 ```{r}
-sample_info = pData(gse)
+sample_info = pData(GSE46518_set)
 head(sample_info, n=20)
 
 sample_wt = sample_info |>
