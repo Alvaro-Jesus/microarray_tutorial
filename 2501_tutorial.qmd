@@ -59,54 +59,61 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 BiocManager::install("GEOquery")
 BiocManager::install("limma")
-pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma)
-
+pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, oligo)
+pacman::p_load(pheatmap, tidyverse, ggrepel, tidyplots)
 # tips: browseVignettes('packagename')
 # tips: methods(class=class(foo))
-# for vscode: install.packages("httpgd")
 # for vscode: pip3 install -U radian
 ```
 
-### 2. Scenario A: Assuming everything is fine
+### 2. Scenario A: Assuming everything is fine (data normalised)
 ```{r}
+# GEO ID and folder
 htlv_id = "GSE55851"
 htlv_tempdir=".temp/"
 
-# obtaining processed data
+# 1. obtaining processed data
 gse2 = getGEO(
   htlv_id, 
   GSEMatrix=TRUE, 
   destdir=htlv_tempdir)
 
-# number of platforms
+# 2. exploring: number of platforms
 length(gse2)
+
+# 3. subsetting
 gse2 <- gse2[[1]]
+
+# 4. further exploration
 pData(gse2) # Sampledata
 fData(gse2) # gene annotation
 exprs(gse2) # expression data
-
-
 
 head(pData(gse2))
 colnames(pData(gse2))
 gse2@annotation
 
-# extract relevant data
+# 5. metadata - extract relevant data
 pinfo = pData(gse2) |>
   dplyr::rename(typex="characteristics_ch1.1", age="characteristics_ch1.2", gender="characteristics_ch1.3") |>
   dplyr::select(typex, age, gender) |>
   dplyr::mutate(across(everything(), ~ sub(".*: ", "", .)))
+
 pinfo$ID <- rownames(pinfo)
 pinfo
 
-# Check if normalised
-boxplot(log2(exprs(gse2)), outline=F) #not normalised
-#Unsupervised clustering (understand the sources of variation and outliers)
-pacman::p_load(pheatmap, tidyverse, ggrepel, tidyplots)
+# 6. Check if normalised
+oligo::hist(log2(exprs(gse2)))
 
+boxplot(log2(exprs(gse2)), outline=F) #not normalised
+
+#Unsupervised clustering (understand the sources of variation and outliers)
 rownames(pinfo) <- colnames(cor(exprs(gse2), use="c"))
+
+#Check IDs
 table(rownames(pinfo), pinfo$ID)
-pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo) #c stops if any missing data point
+
+pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo[,c(3,1)]) #c stops if any missing data point, "complete.obs"
 
 # PCA - mandatory to transpose
 pca <- prcomp(t(exprs(gse2)))
@@ -118,12 +125,39 @@ add_data_labels_repel() |>
 adjust_size(width = 100, height = 100, unit = "mm")
 
 #remove outliers: gse <- gse[,-outlier_samples]
+
 #---- Normalisation
 # Load required libraries
 library(limma)
 
 # Step 2: Background correction
-agilent_data_bg <- backgroundCorrect(exprs(gse2), method = "rma")
+gsm2 <- exprs(gse2)
+
+gsm2_background<-limma::backgroundCorrect(gse2, method = "normexp")
+
+# Step 3: Normalize the data
+agilent_data_norm <- limma::normalizeWithinArrays(agilent_data_norm, method = "loess")
+
+agilent_data_norm <- limma::normalizeBetweenArrays(gsm2_background, method = "quantile")
+agilent_data_norm
+
+boxplot(log2(agilent_data_norm), outline=F)
+pca <- prcomp(t(log2(agilent_data_norm)))
+library(tidyplots)
+cbind(pinfo, pca$x) |>
+tidyplot(x=PC1, y=PC2, col=typex, label=age, shape=gender) |>
+add_data_points(rasterize = FALSE, rasterize_dpi = 300) |>
+add_data_labels_repel() |>
+adjust_size(width = 100, height = 100, unit = "mm")
+
+library(pheatmap)
+pheatmap(cor(agilent_data_norm, use="c"), annotation_col=pinfo[,c(3,1)])
+
+# Step 4: Log transformation (if needed)
+agilent_data_log <- log2(agilent_data_norm$M)
+
+GSE46518_set <- rma(GSE46518_celdata)
+hist(GSE46518_set, target="core")
 
 # Step 3: Within-array normalization (Loess)
 agilent_data_norm <- normalizeWithinArrays(agilent_data_bg, method = "loess")

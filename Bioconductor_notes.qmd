@@ -1,0 +1,93 @@
+---
+title: "GEO"
+format: html
+editor: visual
+echo: false
+eval: false
+---
+
+Credits: Kasper Daniel Hansen, PhD
+
+```{r}
+pacman::p_load(
+    BiocGenerics, 
+    IRanges,
+    GenomicRanges,
+    GenomeInfoDb # harmonize different naming for chromosomes
+    )
+########
+
+#-Genomic Ranges
+########
+
+### IRanges
+ir <- IRanges(start = 1:3, width = 5)
+df_ir_c <- data.frame(ir=ir)
+df_ir_c
+
+# DataFrame - more versatile
+df_ir <- DataFrame(ir=ir, score = rnorm(3))
+df_ir[1,1]
+df_ir
+
+### GRanges
+gr <- GRanges(seqnames= "chr1", strand = c('+', '-', '+'),
+              ranges = IRanges(start = c(1,3,5), width = 3))
+gr
+values(gr) = DataFrame(score = rnorm(3))
+values(gr)
+gr$score
+
+# ---
+gr2 <- GRanges(seqnames= c("chr1", "chr2", "chr3"), strand = c("*"),
+              ranges = IRanges(start = c(1,3,5), width = 3))
+gr2
+# ---
+findOverlaps(gr, gr2)
+subsetByOverlaps(gr, gr2) # Genomic Range with elements that overlaps
+
+# --- Subset a chromosome
+gr <- GRanges(seqnames = c("chr1", "chr2"),
+              ranges = IRanges(start = 1:2, end = 4:5))
+
+dropSeqlevels(gr, "chr2", pruning.mode="tidy")
+```
+
+
+```{r}
+pacman::p_load(
+    AnnotationHub,# repository online
+    dbplyr,
+    BiocFileCache
+    )
+pacman::p_(AnnotationHub)
+BiocManager::install("AnnotationHub", force=TRUE)
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+# Update Bioconductor and AnnotationHub
+BiocManager::install(version = "3.18")  # Replace with the latest Bioconductor version
+BiocManager::install("AnnotationHub")
+BiocManager::install("Bioconductor/BiocFileCache")
+devtools::install_version("dbplyr", version = "2.3.4")
+
+# Update tidyverse packages (dplyr, dbplyr, etc.)
+install.packages("tidyverse")
+########
+
+#-Annotation hub
+
+AnnotationHub
+ah <- AnnotationHub()
+```
+
+
+
+# classic dataframe
+df_ir_c <- data.frame(ir=ir)
+df_ir_c
+
+# DataFrame - more versatile
+df_ir <- DataFrame(ir=ir, score = rnorm(3))
+df_ir[1,1]
