@@ -53,7 +53,6 @@ gr <- GRanges(seqnames = c("chr1", "chr2"),
 dropSeqlevels(gr, "chr2", pruning.mode="tidy")
 ```
 
-
 ```{r}
 pacman::p_load(
     AnnotationHub,# repository online
@@ -71,23 +70,163 @@ BiocManager::install(version = "3.18")  # Replace with the latest Bioconductor v
 BiocManager::install("AnnotationHub")
 BiocManager::install("Bioconductor/BiocFileCache")
 devtools::install_version("dbplyr", version = "2.3.4")
-
-# Update tidyverse packages (dplyr, dbplyr, etc.)
-install.packages("tidyverse")
 ########
 
 #-Annotation hub
 
-AnnotationHub
 ah <- AnnotationHub()
+ah[1]
+unique(ah$dataprovider)
+
+#- How to use?
+ah = subset(ah, species == "Homo sapiens")
+##- Query: MT-2 and CD69
+qhs = query(ah, c("jurkat"))
+qhs
+gr2 = qhs[[2]] # broad
+gr2 = qhs[[4]] # narrow
+
+summary(width(gr2))
+table(width(gr2))
+
+# Peaks are regions of the genome where there is an enrichment of ChIP-seq signal
+peaks = gr2
+# These peaks represent regions where a protein of interest (often a transcription factor or histone modification) is bound.
+qhs[4]$genome # $genome: hg19
+
+# these regions of enrichment (peaks) are disproportionately located near
+# gene promoters compared to what would be expected by chance.
+
+query = query(ah, "RefSeq") # Reference Sequence Database
+query$genome
+genes = query[[1]]
+
+# how many transcripts per gene
+table(table(genes$name))
+
+prom = promoters(genes)
+prom
+table(width(prom))
+
+ov = findOverlaps(prom, peaks)
+length(unique(queryHits(ov))) # 44938
+length(unique(subjectHits(ov))) # 74488
+
+# percentage of peaks that overlap promoter
+length(subsetByOverlaps(peaks, prom, ignore.strand = TRUE)) / length(peaks)
+
+length(subsetByOverlaps(prom, peaks, ignore.strand = TRUE)) / length(prom)
+
+# Now, is this big or not? Let's look a little bit about the actual,
+# let's look at how big are the peaks and how big are the promoters we
+# have and how big is the intersection. 
+
+sum(width(reduce(peaks, ignore.strand=TRUE))) ## 11 megabases
+sum(width(reduce(prom, ignore.strand=TRUE))) ## 62 megabases
+# And how big is the overlap?
+sum(width(intersect(peaks, prom, ignore.strand=TRUE)))/10^6 # 3 megabases
+
+inOut = matrix(0, ncol = 2, nrow = 2)
+colnames(inOut) = c("in", "out")
+rownames(inOut) = c("in", "out")
+# both in peaks and promoters
+inOut[1,1] <- sum(width(intersect(peaks, prom, ignore.strand=TRUE)))
+# peaks on the rows, promoters on the columns
+# a: in peaks, but not in promoters
+inOut[1, 2] <- sum(width(setdiff(peaks, prom, ignore.strand = TRUE)))
+# b: in promoters, but not in peaks
+inOut[2, 1] <- sum(width(setdiff(prom, peaks, ignore.strand = TRUE)))
+inOut
+colSums(inOut)
+rowSums(inOut)
+# lets say human genome is 3m bases.(but is it okay? some of the bases have not even been sequenced)
+inOut[2,2] <- 3*10^9 - sum(inOut)
+
+# one diagonal by other
+addsRatio = inOut[1,1] * inOut[2,2] / (inOut[2,1] * inOut[1,2])
+addsRatio # 18.26938
+# Means the overlap is like 18 fold more enriched than we would expect
+
+# Let's change our assumption. - We can do a sensitivity analysis
+# So let's say that only half the human genome is mappable
+inOut[2,2] <- 0
+inOut[2,2] <- (3*10^9)/2 - sum(inOut) # much smaller genome
+addsRatio = inOut[1,1] * inOut[2,2] / (inOut[2,1] * inOut[1,2])
+addsRatio # 8.915016
+# Still much, much bigger than 1
+
+############################## Test #################################
+# Use the AnnotationHub package to obtain data on "CpG Islands" in the human genome.
+ah = AnnotationHub()
+ah = subset(ah, species == "Homo sapiens")
+q = query(ah, "CpG")
+q$genome
+data_islands = q[[1]]
+
+# How many islands exists on the autosomes?
+# chr 1-22
+autosome <- c(paste("chr", 1:22, sep=""))
+autosomal_islands <- subset(data_islands, seqnames(data_islands) %in% autosome)
+length(autosomal_islands)
+
+
+# How many CpG Islands exists on chromosome 4?
+autosomal_islands <- subset(data_islands, seqnames(data_islands) == "chr4")
+length(autosomal_islands)
+
+# Obtain the data for the H3K4me3 histone modification for the H1 cell
+# line from Epigenomics Roadmap, using AnnotationHub. Subset these
+# regions to only keep regions mapped to the autosomes (chromosomes 1 to 22).
+# How many bases does these regions cover?
+qhs = query(ah, c("H3K4me3", "E003"))
+qhs
+data_A <- qhs[[2]]
+autosomal_A <- subset(data_A, seqnames(data_A) %in% autosome)
+sum(width(autosomal_A))
+
+
+# Obtain the data for the H3K27me3
+qhs = query(ah, c("h3K27me3", "E003"))
+qhs
+data <- qhs[[2]]
+autosomal_B <- subset(data, seqnames(data) %in% autosome)
+#  In the return data, each region has an associated "signalValue". 
+# What is the mean signalValue across all regions on the standard chromosomes?
+mean(autosomal_B$signalValue)
+
+
+# Bivalent regions are bound by both H3K4me3 and H3K27me3.
+# Question: Using the regions we have obtained above,
+# how many bases on the standard chromosomes are bivalently marked?
+sum(width(intersect(autosomal_A, autosomal_B)))
+
+  
+# Question 6
+# We will examine the extent to which bivalent regions overlap CpG Islands.
+# Question: how big a fraction (expressed as a number between 0 and 1) of the bivalent regions, overlap one or more CpG Islands?
+bivalent = intersect(autosomal_A, autosomal_B)
+length(subsetByOverlaps(bivalent, autosomal_islands, ignore.strand = TRUE)) / length(bivalent)
+
+
+# Question 7
+# Question: How big a fraction (expressed as a number between 0 and 1)
+# of the bases which are part of CpG Islands, are also bivalent marked.
+biv_islands = intersect(bivalent, autosomal_islands)
+sum(width(biv_islands)) / sum(width(autosomal_islands))
+
+# 8 Question: 
+# How many bases are bivalently marked within 10kb of CpG Islands?
+# Tip: consider using the "resize()"" function.
+autosomal_inslands_10kb <- resize(autosomal_islands, width = width(autosomal_islands) + 20000, fix="center")
+sum(width(intersect(autosomal_inslands_10kb, bivalent)))
+
+  
 ```
 
-
-
 # classic dataframe
-df_ir_c <- data.frame(ir=ir)
-df_ir_c
+
+df_ir_c \<- data.frame(ir=ir) df_ir_c
 
 # DataFrame - more versatile
-df_ir <- DataFrame(ir=ir, score = rnorm(3))
-df_ir[1,1]
+
+df_ir \<- DataFrame(ir=ir, score = rnorm(3)) df_ir\[1,1\]

@@ -47,12 +47,13 @@ RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the la
 AffyBatch -\> ExpressionSet
 
 -   Background correction: removal of background noise (probe pairs, a perfect match (PM), andsingle base mismatch (MM): Affymetrix’s own MAS5 algorithm, RMA ALGORITHM, gcrma algorithm)
--   Normalisation:  quantile normalisation, data on a common empirical distribution
+-   Normalisation: quantile normalisation, data on a common empirical distribution
 -   Summarisation
 
 ## Tutorials
 
 ### 1. Loading packages
+
 ```{r}
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
@@ -67,7 +68,11 @@ pacman::p_load(pheatmap, tidyverse, ggrepel, tidyplots)
 ```
 
 ### 2. Scenario A: Assuming everything is fine (data normalised)
+
 ```{r}
+
+rm(list=ls())
+
 # GEO ID and folder
 htlv_id = "GSE55851"
 htlv_tempdir=".temp/"
@@ -293,6 +298,7 @@ hist(GSE46518_set, target="core")
 pacman::p_load(gcrma)
 GSE46518_gcrma <- gcrma(GSE46518_celdata)
 ```
+
 ```{r}
 # Exploring ExpressionSet
 pData(GSE55851)[1:5,] # Data information or Phenotype data
@@ -309,7 +315,6 @@ pdcheck['supp_name'] <- str_split(pdcheck$supplementary_file,"/") |>
   map_chr(tail,1)
 pdcheck['supp_name'] 
 ```
-
 
 ```{r}
 pData(GSE46518_celdata)$data_processing[1] 
@@ -362,10 +367,7 @@ head(anno_table)
 
 ```
 
-c("XIST: 220729_s_at (Affymetrix Human Genome U133 Plus 2.0 Array)
-RPS4Y1: 205000_at
-KDM5D: 205038_at
-DDX3Y: 205040_at
+c("XIST: 220729_s_at (Affymetrix Human Genome U133 Plus 2.0 Array) RPS4Y1: 205000_at KDM5D: 205038_at DDX3Y: 205040_at
 
 ```{r}
 #vector of sex genes
@@ -419,6 +421,7 @@ print(annotations)
 # To see all available annotation types:
 print(available_columns)
 ```
+
 ## 5. Data wrangling
 
 ```{r}
