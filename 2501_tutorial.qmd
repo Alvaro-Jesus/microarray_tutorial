@@ -70,7 +70,6 @@ pacman::p_load(pheatmap, tidyverse, ggrepel, tidyplots)
 ### 2. Scenario A: Assuming everything is fine (data normalised)
 
 ```{r}
-
 rm(list=ls())
 
 # GEO ID and folder
@@ -107,10 +106,31 @@ pinfo = pData(gse2) |>
 pinfo$ID <- rownames(pinfo)
 pinfo
 
-# 6. Check if normalised
-oligo::hist(log2(exprs(gse2)))
-
+# 6. QC: Check if normalised
+gse2
+ 
+# 6.1 Basic plotting
+boxplot(exprs(gse2), col = "lightblue", main = "Expression Distribution", las = 2)
 boxplot(log2(exprs(gse2)), outline=F) #not normalised
+plotDensities(log2(exprs(gse2)), legend = FALSE, main = "Density Plot of Expression Values")
+oligo::hist(log2(exprs(gse2)))
+pacman::p_load(marray)
+limma::plotMA(gse2, main = "MA Plot")
+sum(is.na(exprs(gse2)))
+
+# 6.2 customized plotting A
+library(reshape2)
+exprs_data <- as.data.frame(log2(exprs(gse2)))
+exprs_data_melt <- melt(exprs_data)
+ggplot(exprs_data_melt, aes(x = variable, y = value)) +
+  geom_boxplot(fill = "lightblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Expression Distribution", x = "Samples", y = "Expression Value")
+
+# 6.3 customized plotting B
+ggplot(exprs_data_melt, aes(x = value, color = variable)) +
+  geom_density() +
+  labs(title = "Density Plot of Expression Values", x = "Expression Value", y = "Density")
 
 #Unsupervised clustering (understand the sources of variation and outliers)
 rownames(pinfo) <- colnames(cor(exprs(gse2), use="c"))
@@ -121,7 +141,7 @@ table(rownames(pinfo), pinfo$ID)
 pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo[,c(3,1)]) #c stops if any missing data point, "complete.obs"
 
 # PCA - mandatory to transpose
-pca <- prcomp(t(exprs(gse2)))
+pca <- prcomp(t(exprs(gse2)), scale.=TRUE)
 
 cbind(pinfo, pca$x) |>
 tidyplot(x=PC1, y=PC2, col=typex, label=age, shape=gender) |>
@@ -131,17 +151,22 @@ adjust_size(width = 100, height = 100, unit = "mm")
 
 #remove outliers: gse <- gse[,-outlier_samples]
 
+#####################
+#- Annotation
+fData(gse2)
+pData(gse2)
+
+
+
 #---- Normalisation
 # Load required libraries
 library(limma)
 
 # Step 2: Background correction
-gsm2 <- exprs(gse2)
-
-gsm2_background<-limma::backgroundCorrect(gse2, method = "normexp")
-
+gsm2 <- limma::backgroundCorrect(gse2,  method="normexp", offset = 20)
+gsm2
 # Step 3: Normalize the data
-agilent_data_norm <- limma::normalizeWithinArrays(agilent_data_norm, method = "loess")
+gsm2_ma <- normalizeWithinArrays(gsm2, method="loess")
 
 agilent_data_norm <- limma::normalizeBetweenArrays(gsm2_background, method = "quantile")
 agilent_data_norm
