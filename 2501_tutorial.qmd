@@ -42,7 +42,9 @@ Data repository from NCBI with functional genomic data.
 
 ### Affymetrix
 
-RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the last step.
+RMA normalized and filtered to remove low-expressing genes.
+
+RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the last step. (If it is log-transformed: typically in the range of 0 to 16)
 
 AffyBatch -\> ExpressionSet
 
@@ -64,9 +66,10 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 BiocManager::install("GEOquery")
 BiocManager::install("limma")
-pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, oligo)
+pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, oligo, DT, marray)
 pacman::p_load(pheatmap, tidyplots)
 pacman::p_load(data.table, biomaRt, arrayQualityMetrics, testit, gplots, AgiMicroRna)
+library(reshape2)
 # tips: browseVignettes('packagename')
 # tips: methods(class=class(foo))
 # for vscode: pip3 install -U radian
@@ -79,7 +82,7 @@ isLog2Transformed <- function(data){
   }
 ```
 
-### 2. Scenario A: Assuming everything is fine (data normalised)
+### 2. Scenario A: Assuming everything is fine (data normalized)
 
 ```{r}
 rm(list=ls())
@@ -92,102 +95,141 @@ htlv_tempdir=".temp/"
 gse2 = getGEO(
   htlv_id, 
   GSEMatrix=TRUE, 
-  destdir=htlv_tempdir)
+  destdir=htlv_tempdir) # this will download a file: GSE55851_series_matrix.txt.gz
 
 # 2. exploring: number of platforms
 length(gse2)
+class(gse2)
 
 # 3. subsetting
-gse2 <- gse2[[1]]
+gse2 <- gse2[[1]] # OBJECT: ExpressionSet
 
 # 4. further exploration
 pData(gse2) # Sampledata
+colnames(pData(gse2))
+head(pData(gse2)$supplementary_file)
+datatable(pData(gse2)) #select important variables
+pData(gse2)$data_processing[1]
+
 fData(gse2) # gene annotation
 exprs(gse2) # expression data
 
-head(pData(gse2))
-colnames(pData(gse2))
-gse2@annotation
+gse2@annotation # which chip
 
 # 5. metadata - extract relevant data
+
 pinfo = pData(gse2) |>
-  dplyr::rename(typex="characteristics_ch1.1", age="characteristics_ch1.2", gender="characteristics_ch1.3") |>
-  dplyr::select(typex, age, gender) |>
-  dplyr::mutate(across(everything(), ~ sub(".*: ", "", .)))
+  dplyr::rename(
+      type_disease="characteristics_ch1.1",
+      age="characteristics_ch1.2", 
+      gender="characteristics_ch1.3"
+  ) |>
+  dplyr::select(
+      type_disease, 
+      age, 
+      gender) |>
+  dplyr::mutate(
+      across(
+          everything(), ~ sub(".*: ", "", .)
+      )
+  )
+pinfo$group = NA
+
+for (i in 1:nrow(pinfo)) {
+    if (str_detect(pinfo$type_disease[i], regex("ATL", ignore_case = TRUE)) && (pinfo$gender[i]=="male")) {pinfo$group[i] <- "ATL-male"} 
+    else if (str_detect(pinfo$type_disease[i], regex("carrier", ignore_case = TRUE)) && (pinfo$gender[i]=="male")) {pinfo$group[i] <- "AC-male"} 
+    else if (str_detect(pinfo$type_disease[i], regex("Normal", ignore_case = TRUE)) && (pinfo$gender[i]=="male")) {pinfo$group[i] <- "HD-male"}
+}
 
 pinfo$ID <- rownames(pinfo)
-pinfo
+datatable(pinfo)
 
 # 6. QC: Check if normalised
-gse2
+summary(exprs(gse2))
+boxplot(exprs(gse2), col = "lightblue", main = "Expression Distribution", las = 2, outline=F)
+
+summary(log2(exprs(gse2)))
+boxplot(log2(exprs(gse2)), col = "lightblue", main = "Expression Distribution", las = 2, outline=F)
+
+isLog2Transformed(exprs(gse2))
  
 # 6.1 Basic plotting
-boxplot(exprs(gse2), col = "lightblue", main = "Expression Distribution", las = 2)
-boxplot(log2(exprs(gse2)), outline=F) #not normalised
+plotDensities(exprs(gse2), legend = FALSE, main = "Density Plot of Expression Values")
 plotDensities(log2(exprs(gse2)), legend = FALSE, main = "Density Plot of Expression Values")
+
 oligo::hist(log2(exprs(gse2)))
-pacman::p_load(marray)
-limma::plotMA(gse2, main = "MA Plot")
+
+limma::plotMA(exprs(gse2), main = "MA Plot")
+limma::plotMA(log2(exprs(gse2)), main = "MA Plot")
+
+# Sum of NAs
 sum(is.na(exprs(gse2)))
 
-# 6.2 customized plotting A
-library(reshape2)
-exprs_data <- as.data.frame(log2(exprs(gse2)))
-exprs_data_melt <- melt(exprs_data)
-ggplot(exprs_data_melt, aes(x = variable, y = value)) +
+# 6.2 Customized plotting 
+exprs_data <- melt(as.data.frame(log2(exprs(gse2))))
+
+# customized with ggplot2
+ggplot(exprs_data, aes(x = variable, y = value)) +
   geom_boxplot(fill = "lightblue") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(title = "Expression Distribution", x = "Samples", y = "Expression Value")
+  theme(
+      axis.text.x = element_text(angle = 90, hjust = 1)
+  ) +
+  labs(
+      title = "Expression Distribution", 
+      x = "Samples", 
+      y = "Expression Value")
+
+# customized with tidyplots
+exprs_data |>
+    tidyplot(x=variable, y=value) |>
+    add_boxplot() |>
+    adjust_x_axis(rotate_labels = 60) |>
+    adjust_size(width = 100, height = 100)
 
 # 6.3 customized plotting B
 ggplot(exprs_data_melt, aes(x = value, color = variable)) +
   geom_density() +
   labs(title = "Density Plot of Expression Values", x = "Expression Value", y = "Density")
 
-#Unsupervised clustering (understand the sources of variation and outliers)
+# 6.4 Unsupervised clustering (understand the sources of variation and outliers - hierarchical clustering) correlation on the scale of 0 to 1
 rownames(pinfo) <- colnames(cor(exprs(gse2), use="c"))
-
-#Check IDs
-table(rownames(pinfo), pinfo$ID)
-
-pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo[,c(3,1)]) #c stops if any missing data point, "complete.obs"
+pheatmap(cor(exprs(gse2), use="c"))
+pheatmap(cor(exprs(gse2), use="c"), annotation_col=pinfo[,c(3,5)]) #c stops if any missing data point, "complete.obs"
 
 # PCA - mandatory to transpose
 pca <- prcomp(t(exprs(gse2)), scale.=TRUE)
 
 cbind(pinfo, pca$x) |>
-tidyplot(x=PC1, y=PC2, col=typex, label=age, shape=gender) |>
+tidyplot(x=PC1, y=PC2, col=type_disease, label=age, shape=gender) |>
 add_data_points(rasterize = FALSE, rasterize_dpi = 300) |>
 add_data_labels_repel() |>
 adjust_size(width = 100, height = 100, unit = "mm")
 
 #remove outliers: gse <- gse[,-outlier_samples]
-
 #####################
-#- Annotation
-fData(gse2)
-pData(gse2)
 
-
-
-#---- Normalisation
+# 7---- Normalisation
 # Load required libraries
-library(limma)
+library(limma) #“Linear models for microarray”
 
-# Step 2: Background correction
+# 7.2 Background correction
 gsm2 <- limma::backgroundCorrect(gse2,  method="normexp", offset = 20)
-gsm2
+
 # Step 3: Normalize the data
-gsm2_ma <- normalizeWithinArrays(gsm2, method="loess")
+#gsm2_ma <- limma::normalizeWithinArrays(gsm2, method="loess") # only for two-color arrays
+agilent_data_norm <- limma::normalizeBetweenArrays(gsm2, method = "quantile")
+agile2log = log2(agilent_data_norm)
 
-agilent_data_norm <- limma::normalizeBetweenArrays(gsm2_background, method = "quantile")
-agilent_data_norm
+# Step 4. Check normalization
+summary(agile2log)
+boxplot(agile2log, col = "lightblue", main = "Expression Distribution", las = 2, outline=F)
+plotDensities(agile2log, legend = FALSE, main = "Density Plot of Expression Values")
+oligo::hist(agile2log)
+limma::plotMA(agile2log, main = "MA Plot")
 
-boxplot(log2(agilent_data_norm), outline=F)
-pca <- prcomp(t(log2(agilent_data_norm)))
-library(tidyplots)
+pca <- prcomp(t(agile2log))
 cbind(pinfo, pca$x) |>
-tidyplot(x=PC1, y=PC2, col=typex, label=age, shape=gender) |>
+tidyplot(x=PC1, y=PC2, col=type_disease, label=age, shape=gender) |>
 add_data_points(rasterize = FALSE, rasterize_dpi = 300) |>
 add_data_labels_repel() |>
 adjust_size(width = 100, height = 100, unit = "mm")
@@ -195,9 +237,142 @@ adjust_size(width = 100, height = 100, unit = "mm")
 library(pheatmap)
 pheatmap(cor(agilent_data_norm, use="c"), annotation_col=pinfo[,c(3,1)])
 
-# Step 4: Log transformation (if needed)
-agilent_data_log <- log2(agilent_data_norm$M)
 
+# ------8. Differential expression analysis
+
+design <- model.matrix(~0 + pinfo$group)
+## calculate median expression level
+cutoff <- median(agile2log)
+
+## TRUE or FALSE for whether each gene is "expressed" in each sample
+is_expressed <- agile2log > cutoff
+## Identify genes expressed in more than 2 samples
+keep <- rowSums(is_expressed) > 3
+## check how many genes are removed / retained.
+table(keep)
+## subset to just those expressed genes
+agile2log_exp <- agile2log[keep,]
+design
+# coping with outliers ##### CAREFUL
+## calculate relative array weights
+aw <- arrayWeights(agile2log_exp[,c(1:2, 4:12, 20)], design)
+aw
+colnames(design) = c("ACmale",  "ATLmale", "HDmale" )
+## Fitting the coefficients
+fit <- lmFit(agile2log_exp[,c(1,2, 4,5,6,7,8,9,10,11,12, 20)], design, weights = aw)
+
+
+## Making comparisons between samples, can define multiple contrasts
+contrasts <- makeContrasts(ACmale - ATLmale, ACmale - HDmale , levels = design)
+
+fit2 <- contrasts.fit(fit, contrasts)
+fit2 <- eBayes(fit2)
+
+
+topTable(fit2)
+topTable1 <- topTable(fit2, coef=1)
+topTable2 <- topTable(fit2, coef=2)
+topTable3 <- topTable(fit2, coef=3)
+topTable4 <- topTable(fit2, coef=4)
+
+#if we want to know how many genes are differentially expressed overall, we can use the decideTest function.
+
+summary(decideTests(fit2))
+table(decideTests(fit2))
+
+anno <- fData(gse2)
+colnames(anno)
+head(anno)
+anno <- dplyr::select(anno, NAME, ID,GB_ACC, GENE_SYMBOL, GENE_NAME)
+
+
+datatable(anno)
+
+topTable(fit2)
+
+# traspose?
+
+
+## Create volcano plot
+full_results1 <- topTable(fit2, coef=2, number=Inf)
+tibble::rownames_to_column(full_results1,"IDx")
+full_results
+  
+ggplot(full_results1,aes(x = logFC, y=B)) + geom_point()
+
+## change according to your needs
+p_cutoff <- 0.05
+fc_cutoff <- 1
+
+top_genes <- full_results1 %>%
+  arrange(desc(abs(logFC))) %>%
+  dplyr::slice(1:10)
+top_genes
+
+full_results1 %>% 
+  mutate(Significant = P.Value < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  ggplot(aes(x = logFC, y = B, col=Significant)) + geom_point() +
+geom_point(data = top_genes, aes(x = logFC, y = B), color = "red", size = 2) +  # Highlight top 10 genes
+  geom_text_repel(
+    data = top_genes,  # Annotate top 10 genes
+    aes(label = GENE_SYMBOL),
+    box.padding = 0.5,  # Adjust spacing
+    point.padding = 0.2,  # Adjust spacing
+    max.overlaps = Inf,  # Ensure all labels are shown
+    size = 3,  # Label text size
+    color = "black"  # Label text color
+  )
+
+dplyr::filter(full_results1, grepl("TP53", GENE_SYMBOL))
+
+ids_of_interest <- mutate(full_results1, Rank = 1:n()) %>% 
+  filter(Rank < topN) %>% 
+  pull(ID)
+gene_names <- mutate(full_results1, Rank = 1:n()) %>% 
+  filter(Rank < topN) %>% 
+  pull(GENE_SYMBOL) 
+
+  
+gene_matrix <- agile2log[ids_of_interest,]
+
+pheatmap(gene_matrix, labels_row = gene_names, scale="row")
+
+my_genes <- c("HIG2", "CA1","ETV4","FOXA1")
+ids_of_interest <-  filter(full_results,Symbol %in% my_genes) %>% 
+  pull(ID)
+
+gene_names <-  filter(full_results,Symbol %in% my_genes) %>% 
+  pull(Symbol)
+
+gene_matrix <- exprs(gse)[ids_of_interest,]
+pheatmap(gene_matrix,
+         labels_row = gene_names,
+         scale="row")
+
+ 
+library(ggrepel)
+p_cutoff <- 0.05
+fc_cutoff <- 1
+topN <- 20
+
+full_results1 %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, Symbol,"")) %>% 
+  ggplot(aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + geom_text_repel(col="black")
+## Get the results for particular gene of interest
+#GB_ACC for Nkx3-1 is NM_001256339 or NM_006167
+##no NM_001256339 in this data
+full_results2 <- topTable(fit2, coef=2, number=Inf)
+full_results3 <- topTable(fit2, coef=3, number=Inf)
+full_results4 <- topTable(fit2, coef=4, number=Inf)
+filter(full_results1, GB_ACC == "NM_006167")
+filter(full_results2, GB_ACC == "NM_006167")
+filter(full_results3, GB_ACC == "NM_006167")
+filter(full_results4, GB_ACC == "NM_006167")
+
+
+
+rownames(design)
 GSE46518_set <- rma(GSE46518_celdata)
 hist(GSE46518_set, target="core")
 
@@ -223,6 +398,7 @@ gse = getGEO(
   htlv_id, 
   GSEMatrix=FALSE, #parse SOFT (more information, less errors, slower)
   destdir=htlv_tempdir)
+
 methods(class=class(gse))
 Meta(gse)
 #methods
@@ -580,3 +756,7 @@ image(gse33146_celdata[,1])
 -   (Repository in Spanish)\[https://github.com/u-genoma/BioinfinvRepro\]
 
 -   (Deeply explained)\[https://gtk-teaching.github.io/Microarrays-R/\]
+
+1.  Introduction to microarray analysis GSE15947, by Department of Statistics, Purdue Univrsity <https://www.stat.purdue.edu/bigtap/online/docs/Introduction_to_Microarray_Analysis_GSE15947.html>
+
+2.  Mark Dunning, 2020, GEO tutorial, by Sheffield Bioinformatics Core <https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html#Further_processing_and_visualisation_of_DE_results>
