@@ -38,6 +38,14 @@ Data repository from NCBI with functional genomic data.
 
 ![\[2\]: GSE55851](images/paste-1.png)
 
+#### Additional information:
+
+-   GEO Data Set(GDS): processed data on GEO (it may have multiple platforms). \[GDS2eSet, GDSXXXX\]
+
+-   ExpressionSet: only one platform, if \[GSEMatrix=TRUE\]
+
+-   GSE: \[GSEMatrix=FALSE\]
+
 ## 4. Normalisation
 
 ### Affymetrix
@@ -48,9 +56,39 @@ RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the la
 
 AffyBatch -\> ExpressionSet
 
--   Background correction: removal of background noise (probe pairs, a perfect match (PM), andsingle base mismatch (MM): Affymetrix’s own MAS5 algorithm, RMA ALGORITHM, gcrma algorithm)
+-   Background correction: removal of background noise (probe pairs, a perfect match (PM), and single base mismatch (MM): Affymetrix’s own MAS5 algorithm):
+    -    RMA ALGORITHM ignores MM probes.
+    -    gcrma algorithm: background depends on the GC content.
 -   Normalisation: quantile normalisation, data on a common empirical distribution
+    -   \`normalize(set, method='quantile', which='pm')\`
+    -   \`hist(oligo_set, lwd=2, xlab='log intensity', which='pm')\`
 -   Summarisation
+    -   \`rma(oligo_norm, background=FALSE, normalize=FALSE)\`
+    -   \`histo(oligo_sum)\`
+
+### RMA in R
+
+\`affy::rma()\` - takes an AffyBatch object, returns an ExpressionSet
+
+\`oligo::basicRMA()\` - takes an ExpressionFeatureSet object
+
+### Exploring ExpressionSet
+
+`pData(GSE55851)[1:5,]# Data information or Phenotype data`
+
+`fData(GSE55851)` \# Gene annotation
+
+`exprs(GSE55851)[1,]`\` \# Expression data
+
+`varLabels(GSE55851)`\` \# Metadata
+
+\`GSE55851\$supplementary_file\`#Raw files
+
+`annotation(GSE55851)`\`# Chip information
+
+`experimentData(GSE55851)`\`#Experimental info
+
+`featureData(GSE55851)`\`#Probeset data
 
 ## Tutorials
 
@@ -440,6 +478,13 @@ pd["cel_file"]
 accession_number = 'GSE46518' #"GSE46518", "GSE55851"
 
 ## --- C.1A download through getGEOSuppFiles (sometimes doesnt work)
+# oligo::read.celfiles() for Affymetrix, 
+# OligoClasses: list.celfiles()
+# gse33146_celdata <- read.celfiles(list.celfiles('GSE33146',full.names=TRUE,listGzipped=TRUE))
+# oligoClasseslist.celfiles()
+#image(gse33146_celdata[,1])
+
+# read.AffyBatch() only works with 3' Affymetrix chips
 GEOquery::getGEOSuppFiles(accession_number, makeDirectory = TRUE, baseDir = "./.temp")
 tar_file = paste0(accession_number, "/", accession_number, "_RAW.tar")
 untar(tar_file, exdir=paste0(accession_number, "/raw"))
@@ -482,14 +527,20 @@ varLabels(gse2)
 ```
 
 ```{r}
+pacman::p_load(tidyverse)
 # Ultimate example
 htlv_id = "GSE46518"
 # Obtain the processed data
 gse_GSE46518 = getGEO(
   htlv_id, 
-  GSEMatrix=TRUE, 
-  destdir="./.temp")
-gse_GSE46518[[1]]$supplementary_file
+  GSEMatrix=TRUE)
+
+GSE46518 = gse_GSE46518[1]
+methods(class=class(gse_GSE46518))
+methods(class=class(GSE46518))
+GSE46518[[1]]$supplementary_file
+
+pData(GSE46518[[1]])
 
 #Obtain data and attach to supp files
 pd <- pData(gse_GSE46518[[1]])
