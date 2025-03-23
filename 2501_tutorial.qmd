@@ -57,8 +57,8 @@ RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the la
 AffyBatch -\> ExpressionSet
 
 -   Background correction: removal of background noise (probe pairs, a perfect match (PM), and single base mismatch (MM): Affymetrix’s own MAS5 algorithm):
-    -    RMA ALGORITHM ignores MM probes.
-    -    gcrma algorithm: background depends on the GC content.
+    -   RMA ALGORITHM ignores MM probes.
+    -   gcrma algorithm: background depends on the GC content.
 -   Normalisation: quantile normalisation, data on a common empirical distribution
     -   \`normalize(set, method='quantile', which='pm')\`
     -   \`hist(oligo_set, lwd=2, xlab='log intensity', which='pm')\`
