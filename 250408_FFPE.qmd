@@ -1,0 +1,187 @@
+
+# Gene Expression Signatures for the Accurate Diagnosis of Peripheral T-Cell Lymphoma Entities in the Routine Clinical Practice
+```{r}
+pacman::p_load(httpgd,
+    GEOquery,
+    limma,
+    umap,
+    DT,
+    tidyverse)
+
+# Retrieving dataset
+gset <- getGEO("GSE225759", 
+    GSEMatrix =TRUE, 
+    getGPL=FALSE)
+
+# Check if there are multiple platforms
+length(gset)
+
+if (length(gset) > 1) idx <- grep("GPL33154", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+colnames(pData(gset))
+unique(pData(gset)$characteristics_ch1.5)
+tail(pData(gset))
+
+# Metadata
+metadata = pData(gset) |>
+    dplyr::rename(
+        caseID="case # from supplemental table9 (pmid35839444):ch1",
+        nanostring="nanosstringclass:ch1",
+    ) |>
+    dplyr::select(
+        geo_accession,
+        characteristics_ch1.5,
+        supplementary_file,
+        nanostring,
+        caseID
+    ) |>
+    dplyr::rename(
+        subtype="characteristics_ch1.5") |>
+    mutate(
+        subtype=str_remove(subtype, "nanostringclass: "),
+        subtype=str_replace_na(subtype, ""),
+        nanostring=str_replace_na(nanostring, ""),
+        final_subtype=stringr::str_c(subtype, nanostring)
+        ) |>
+    select(geo_accession,
+    supplementary_file,
+    caseID,
+    final_subtype)
+
+unique(metadata$final_subtype)
+
+datatable(metadata)
+atl_ptcl = metadata |>
+    filter(final_subtype%in%c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg")
+    ) |>
+    pull(geo_accession)
+
+atl_ptcl = metadata |>
+    filter(final_subtype%in%c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg"))|>
+    select(geo_accession, final_subtype ) |>
+    mutate(final_subtype=dplyr::recode(final_subtype, ATLL="ATLL",
+    "PTCL-TBX21"="PTCLTBX", "PTCL-GATA3"="PTCLGATA", "ALCL-neg"="ALCLneg", "ALCL-pos"="ALCLpos"))
+
+
+class(metadata$geo_accession)
+```
+
+
+```{r}
+isLog2Transformed <- function(data){
+  qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+  shouldBeLogged <- (qx[5] > 100) || (qx[6]-qx[1] > 50 && qx[2] > 0)
+  return(!shouldBeLogged)
+  }
+isLog2Transformed(exprs(gset))
+
+colnames(gset)
+
+exprs_long <- exprs(gset) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("ProbeID") |> 
+  pivot_longer(
+    cols = -ProbeID,
+    names_to = "Sample", 
+    values_to = "Expression",
+    values_drop_na = TRUE  # Drops rows where Expression is NA
+  ) |>
+  filter(Sample%in%atl_ptcl) 
+
+exprs_long
+
+# Corrected pivot_wider syntax
+exprs_wider <- exprs_long |>
+  pivot_wider(
+    id_cols = ProbeID,
+    names_from = Sample,
+    values_from = Expression
+  )
+# Important follow-up steps:
+exprs_wider
+##  Convert to matrix (for many bioinformatics functions)
+exprs_matrix <- exprs_wider |>
+  column_to_rownames("ProbeID") |>
+  as.matrix()
+exprs_matrix
+
+pacman::p_load(tidyplots)
+
+exprs_long |>
+    #filter(ProbeID=="ABCC13") |>
+    left_join(metadata, by=c("Sample"="geo_accession"))  |>
+    tidyplots::tidyplot(x=ProbeID, y=Expression, color=final_subtype) |>
+    tidyplots::add_median_dash() |>
+    add_test_asterisks() 
+
+
+unique(exprs_long$ProbeID)
+
+sample_stats <- exprs_long %>%
+  group_by(Sample) %>%
+  summarise(
+    mean_exp = mean(Expression, na.rm = TRUE),
+    median_exp = median(Expression, na.rm = TRUE),
+    missing_pct = sum(is.na(Expression))/n() * 100
+  )
+sample_stats
+
+# Density plots by sample
+ggplot(exprs_long, aes(Expression, color = Sample)) +
+  geom_density() +
+  theme_minimal() +
+  labs(title = "Expression Distribution by Sample")
+```
+
+
+```{r}
+# First perform differential expression analysis to find significant probes
+library(limma)
+
+# Create design matrix based on final_subtype
+design <- model.matrix(~0 + factor(atl_ptcl$final_subtype))
+rownames(design) = atl_ptcl$geo_accession
+
+colnames(design) <- levels(factor(atl_ptcl$final_subtype))
+design
+
+all(colnames(exprs_matrix) == rownames(design))
+colnames(exprs_matrix)
+rownames(exprs_matrix)
+# Fit linear model
+fit <- lmFit(exprs_matrix, design)
+
+# Make contrasts (adjust based on your comparisons)
+levels(factor(atl_ptcl$final_subtype))
+contrast.matrix <- makeContrasts(
+  ATLL_vs_PTCLTBX = ATLL - PTCLTBX,
+  ATLL_vs_PTCLGATA = ATLL - PTCLGATA,
+  ATLL_vs_ENKTL = ATLL - ENKTL,
+  ATLL_vs_AITL = ATLL - AITL,
+  ATLL_vs_ALCLpos = ATLL - ALCLpos,
+  ATLL_vs_ALCLneg = ATLL - ALCLneg,
+  levels = design
+)
+
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+# Get significant probes (FDR < 0.05)
+top_probes <- topTable(fit2, number = Inf, p.value = 0.01, adjust.method = "BH")
+top_probes |>
+    arrange(adj.P.Val) |>
+    head(50)
+
+# Filter expression data for significant probes only
+exprs_sig <- exprs_long %>%
+  left_join(metadata, by = c("Sample" = "geo_accession")) %>%
+  filter(ProbeID %in% rownames(top_probes)) 
+
+# Create the plot with statistical testing
+exprs_sig %>%
+  tidyplots::tidyplot(x = ProbeID, y = Expression, color = final_subtype) |>
+  tidyplots::add_median_dash() |>
+  tidyplots::add_test_asterisks() |>
+  tidyplots::adjust_x_title()
+```
