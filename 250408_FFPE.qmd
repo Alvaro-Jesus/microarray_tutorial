@@ -11,15 +11,20 @@ pacman::p_load(httpgd,
 # Retrieving dataset
 gset <- getGEO("GSE225759", 
     GSEMatrix =TRUE, 
-    getGPL=FALSE)
+    getGPL=FALSE,
+    destdir="./temp")
 
 # Check if there are multiple platforms
 length(gset)
 
 if (length(gset) > 1) idx <- grep("GPL33154", attr(gset, "names")) else idx <- 1
+# A list: gse[[1]]
 gset <- gset[[idx]]
 
+# Exploration
+head(pData(gset))
 colnames(pData(gset))
+
 unique(pData(gset)$characteristics_ch1.5)
 tail(pData(gset))
 

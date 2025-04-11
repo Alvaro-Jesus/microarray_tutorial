@@ -1,0 +1,19 @@
+---
+bibliography: references.bib
+---
+
+GSE143986 - Genomic landscape of young ATLL patients identifies frequent targetable CD28 fusions
+
+@yoshida2020
+
+GSE33615 - [Whole genome gene expression profiling in Adult T-cell Leukemia (ATL) cells and in Normal CD4+ T-cells](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE33615)
+
+## @amador2022
+
+Gene Expression Signatures for the Accurate Diagnosis of Peripheral T-Cell Lymphoma Entities in the Routine Clinical Practice
+
+(Zinc Finger CCHC-Type Containing 12) is a poorly characterized gene encoding a zinc finger protein, possibly involved in RNA binding or protein-protein interactions - regulates RNA stability or transcription
+
+### @tattermusch2012
+
+GSE29333
