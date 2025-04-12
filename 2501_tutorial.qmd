@@ -27,7 +27,7 @@ Data repository from NCBI with functional genomic data.
 
 ![\[1\]: Figure from Greg Tucker-Kellogg](images/ExpressionSet.png)
 
-## 3. GEO Files
+## 3. GEO Files (CEL \>\> SOFT \>\> Matrix)
 
 -   SOFT: information about the experiment (MIAME), estimates for each gene, transcript.
 -   MINiML: XML format.
@@ -107,6 +107,14 @@ BiocManager::install("limma")
 pacman::p_load(GEOquery, tidyverse, ggrepel, survminer, limma, oligo, DT, marray)
 pacman::p_load(pheatmap, tidyplots)
 pacman::p_load(data.table, biomaRt, arrayQualityMetrics, testit, gplots, AgiMicroRna)
+pacman::p_load(
+    affy,
+    oligo,
+    oligoClasses,
+    limma,
+    hgu133plus2.db,
+    org.Hs.eg.db
+)
 library(reshape2)
 # tips: browseVignettes('packagename')
 # tips: methods(class=class(foo))
@@ -122,6 +130,159 @@ isLog2Transformed <- function(data){
 
 ### 2. Scenario A: Assuming everything is fine (data normalized)
 
+The affy package also has a list.celfiles() function (with a slightly different interface), and offers a read.AffyBatch() function to read celfiles. However, the affy package can only work with 3′ biased Affymetrix arrays, so oligo is preferred
+
+For Agilent files, important columns are typically:
+- gMedianSignal (foreground)
+- gBGMedianSignal (background)
+- gIsWellAboveBG (quality flag)
+```{r}
+options(GEOquery.integrate.https = FALSE)
+softgse = getGEO("GSE55851", GSEMatrix=FALSE, destdir=".temp" ) #GSEMatrix will download a soft vs matrix (GSE vs ExpressionSet)
+softgse
+methods(class=class(softgse))
+# head(Table(softgse)) #works for soft
+head(Meta(softgse)) #works for soft
+Meta(softgse)
+methods(class=class(softgse))
+class(softgse) # GSE because is a SOFT file: GSM + GPLlist
+names(GSMList(softgse))
+GPLList(softgse)
+
+### Downloading CEL files
+filePaths <- getGEOSuppFiles('GSE55851', baseDir=".temp")
+untar(rownames(filePaths)[1], exdir = ".temp/GSE55851")
+
+sample_file <- list.files(".temp/GSE55851", pattern = "\\.txt\\.gz$", full.names = TRUE)[1]
+head(read.delim(gzfile(sample_file), nrows = 3))
+
+# This dataset is from agilent
+agilent_data <- read.maimages(
+  files = list.files(".temp/GSE55851", pattern = "\\.txt\\.gz$", full.names = TRUE),
+  source = "agilent",
+  green.only = TRUE,
+  columns = list(
+    G = "gMedianSignal",       # Foreground signal
+    Gb = "gBGMedianSignal"     # Background signal
+  ),
+  other.columns = "gIsWellAboveBG"  # Quality flag (if column exists)
+)
+
+# After successful read
+# Correct background (recommended: "normexp" for Agilent)
+bg_corrected <- limma::backgroundCorrect(agilent_data, method = "normexp") #offset = 50)
+# Quantile normalization (standard for single-color)
+normalized_data <- normalizeBetweenArrays(bg_corrected, method = "quantile")
+
+
+## check it
+
+summary(normalized_data$E)
+isLog2Transformed(normalized_data$E)
+plotDensities(normalized_data, legend = FALSE)
+### method 2, if it contains p-values
+agilent_data <- read.maimages(files = list.files(".temp/GSE55851", pattern = "\\.txt\\.gz$", full.names = TRUE), source = "agilent", green.only = TRUE)
+normalized_data <- limma::neqc(agilent_data)
+# Optional: Log2 transform (if not done automatically)
+# normalized_data$E <- log2(normalized_data$E)
+
+
+pca <- prcomp(t(normalized_data$E))
+plot(pca$x[, 1:2], pch = 19, col = "blue", main = "PCA Plot")
+
+# Remove probes with low signal (if quality flags exist)
+if ("gIsWellAboveBG" %in% names(normalized_data$other)) {
+  keep <- rowSums(normalized_data$other$gIsWellAboveBG == 1) >= ncol(normalized_data)/2
+  normalized_data <- normalized_data[keep, ]
+}
+
+# Remove control probes (e.g., Agilent's "A_" prefixes)
+is_control <- grepl("^A_", rownames(normalized_data))
+normalized_data <- normalized_data[!is_control, ]
+
+
+############## Annotation
+gpl_annot <- read.delim(gzfile(".temp/GSE55851/GPL/GPL10332_old_annotations.txt.gz"), skip=21)
+gpl_annot |>
+  filter(str_detect(CHROMOSOMAL_LOCATION, "chrX")) |>
+  separate(
+  CHROMOSOMAL_LOCATION,
+  into = c("CHROMOSOME", "LOCATION"),  # New column names
+  sep = ":"
+) |>
+  separate(
+  LOCATION,
+  into = c("START", "END"),  # New column names
+  sep = "-"
+) |>
+ mutate(
+    genint = ifelse(
+      between(as.numeric(START), 117957753, 117960931) & 
+      between(as.numeric(END), 117957753, 117960931),
+      "YES", 
+      "NO"
+    )
+  ) |>
+  # Filter for probes fully within the interval
+  filter(genint == "YES")
+
+zinc_finger_probes <- gpl_annot[gpl_annot$CHROMOSOME == "20" & 
+                                gpl_annot$START >= 61678917 & 
+                                gpl_annot$END <= 61682078, ]
+zinc_finger_probes <- gpl_annot[grep("ZCCHC12|CCHC.*12|54800", 
+                                    gpl_annot$GENE_SYMBOL, 
+                                    ignore.case = TRUE), ]
+zinc_finger_probes
+gpl2 = getGEO("GPL10332")
+annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID")]
+annot |>
+  filter("ENSEMBL_ID"=="ENST00000310164.3")
+# Map to your data
+normalized_data$genes <- annot[match(rownames(normalized_data), annot$ID), ]
+# This is a list matrix file
+softgse = softgse[[1]]
+softgse
+
+```
+
+```{r}
+library(biomaRt)
+library(GenomicRanges)
+
+# Connect to Ensembl
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Get coordinates of your gene (e.g., "BRCA1")
+gene_info <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position"),
+  filters = "hgnc_symbol",
+  values = "ZCCHC12",  # Replace with your gene of interest
+  mart = ensembl
+)
+
+# Define the target region (±100kb)
+target_region <- GRanges(
+  seqnames = gene_info$chromosome_name,
+  ranges = IRanges(
+    start = gene_info$start_position - 100000,
+    end = gene_info$end_position + 100000
+  )
+)
+
+nearby_genes <- getBM(
+  attributes = c("hgnc_symbol", "chromosome_name", "start_position", "end_position"),
+  filters = c("chromosome_name", "start", "end"),
+  values = list(
+    chromosome_name = gene_info$chromosome_name,
+    start = start(target_region),
+    end = end(target_region)
+  ),
+  mart = ensembl
+)
+nearby_genes
+# Filter out the target gene itself
+nearby_genes <- nearby_genes[nearby_genes$hgnc_symbol != "BRCA1", ]
+```
 ```{r}
 rm(list=ls())
 
@@ -139,10 +300,12 @@ gse2 = getGEO(
 length(gse2)
 class(gse2)
 
+
 # 3. subsetting
 gse2 <- gse2[[1]] # OBJECT: ExpressionSet
 
 # 4. further exploration
+
 pData(gse2) # Sampledata
 colnames(pData(gse2))
 head(pData(gse2)$supplementary_file)
