@@ -1,0 +1,55 @@
+
+```{r}
+pacman::p_load(
+    GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots,  affy, oligoClasses
+)
+# function
+isLog2Transformed <- function(data){
+  qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+  shouldBeLogged <- (qx[5] > 100) || (qx[6]-qx[1] > 50 && qx[2] > 0)
+  return(!shouldBeLogged)
+  }
+
+
+# First obtain metadata
+id="GSE33615"
+meta = getGEO(id, GSEMatrix=TRUE, destdir=".temp" ) 
+meta=meta[[1]]
+
+varLabels(meta)
+head(pData(meta))
+# GPL4133
+pd
+pd <- pData(meta) |>
+  tibble::rownames_to_column("ID") |>
+  dplyr::select("characteristics_ch1.1", "characteristics_ch1.2", "characteristics_ch1.3", ID, supplementary_file) |>
+  dplyr::mutate(file = str_split(supplementary_file, "/") |> map_chr(tail, 1)) |>
+  dplyr::rename(atl_subtype="characteristics_ch1.1", age="characteristics_ch1.2", gender="characteristics_ch1.3") |>
+  dplyr::mutate(across(
+    c(atl_subtype, age, gender),
+    ~ stringr::str_remove(., "^.*: ")  
+  )) |>
+  mutate(atl_subtype2 = dplyr::recode_factor(atl_subtype, 
+    "Acute"="ATLa",
+    "Lymphoma"="ATLa",
+    "Chronic"="ATLc",
+    "Smoldering"="ATLc",
+    "HTLV-1 uninfected"="HD",
+  )) |>
+  dplyr::filter(atl_subtype2!="Unkown")
+
+pd7 = pd
+
+### Re-read the raw files
+agilent_data <- read.maimages(
+  files = paste0(".temp/GSE55851/", pd7$file),
+  source = "agilent",
+  green.only = TRUE,
+  names = pd7$ID,
+  columns = list(
+    E = "gMedianSignal",       # Foreground signal
+    Eb = "gBGMedianSignal"     # Background signal
+  ),
+  other.columns = "gIsWellAboveBG"  # Quality flag (if column exists)
+)
+```

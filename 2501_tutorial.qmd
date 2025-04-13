@@ -123,12 +123,7 @@ library(reshape2)
 # tips: methods(class=class(foo))
 # for vscode: pip3 install -U radian
 
-# function
-isLog2Transformed <- function(data){
-  qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
-  shouldBeLogged <- (qx[5] > 100) || (qx[6]-qx[1] > 50 && qx[2] > 0)
-  return(!shouldBeLogged)
-  }
+
 ```
 
 ### 2. Scenario A: Assuming everything is fine (data normalized)
@@ -187,9 +182,6 @@ normalized_data <- normalizeBetweenArrays(bg_corrected, method = "quantile")
 
 
 ## check it
-
-summary(normalized_data$E)
-isLog2Transformed(normalized_data$E)
 plotDensities(normalized_data, legend = FALSE)
 ### method 2, if it contains p-values
 agilent_data <- read.maimages(files = list.files(".temp/GSE55851", pattern = "\\.txt\\.gz$", full.names = TRUE), source = "agilent", green.only = TRUE)
@@ -240,25 +232,11 @@ zinc_finger_probes <- gpl_annot[grep("HBZ",
                                     ignore.case = TRUE), ]
 zinc_finger_probes
 
-
-annot
-annot |>
-  filter("ENSEMBL_ID"=="ENST00000310164.3")
-# Map to your data
-normalized_data$genes <- annot[match(rownames(normalized_data), annot$ID), ]
-# This is a list matrix file
-softgse = softgse[[1]]
-softgse
-
 ```
 
 ```{r}
 library(Biobase)
 #____________________________________________________________
-
-
-
-
 
 ############ #Another method
 ensembl <- useMart('ensembl', dataset = 'hsapiens_gene_ensembl')
@@ -301,8 +279,6 @@ tables[grep('agilent', tables[,1]),] # look for our version
 # #RG$genes$Ensembl <- annotations$ENSEMBL_ID
 # RG$genes$GeneName <- annotEntrez$external_gene_name
 
-
-
 gene_freq = as.data.frame(table(agilent_data$genes$GENE_SYMBOL, useNA="ifany"))
 gene_freq
 gene_freq = gene_freq[order(-gene_freq$Freq),]
@@ -316,101 +292,8 @@ ggplot(gene_freq[1:50,], aes(x = Freq, y = reorder(Var1, Freq))) +
   theme_minimal() # most control 
 
 # genes with multiple "copies" across the genome 
-# todo: averaging or take one with best FC?
 
-agilent_data_avg <- avereps(agilent_data, ID=agilent_data$genes$ENSEMBL_ID) # Probe name from annotations
-dim(agilent_data) # 41689   202
-dim(agilent_data_avg) # 33492   202
-
-head(agilent_data$genes)
-unique(agilent_data$genes$SPOT_ID)
-
-# account for multiple probes
-agilent_data_qc = avereps(agilent_data_avg, ID=agilent_data_avg$genes$ID)
-dim(agilent_data_qc) # 41689   202
-dim(agilent_data_avg) # 41001   202
-
-# is it normalized?
-isLog2Transformed(agilent_data_qc$E)
-
-oligo::hist(agilent_data$E)
-plotDensities(agilent_data, main = "", legend = FALSE)
-plotDensities(agilent_data_qc, main = "", legend = FALSE)
-title(main = "Within- and between-\narray normalized", cex.main = title_size)
          
-####################------------------------------
-# First perform differential expression analysis to find significant probes
-agilent_data_qc
-# Create design matrix based on final_subtype
-design <- model.matrix(~0 + factor(pd7$cd7))
-design 
-# remove low expressing geneS
-cutoff <- median(agilent_data_qc$E)
-cutoff
-## TRUE or FALSE for whether each gene is "expressed" in each sample
-is_expressed <- agilent_data_qc$E > cutoff
-## Identify genes expressed in more than 2 samples
-keep <- rowSums(is_expressed) > 2
-
-## check how many genes are removed / retained.
-table(keep)
-
-## subset to just those expressed genes
-gse <- agilent_data_qc$E[keep,]
-
-gse = agilent_data_qc$E
-rownames(design) = pd7$ID
-design
-colnames(design) <- levels(factor(pd7$cd7))
-head(design, 20)
-
-# Sanity check
-all(colnames(gse) == rownames(design))
-colnames(gse)
-rownames(gse) 
-
-# a test for gse["29693", ] 
-
-gse["29693", ] 
-
-# Fit linear model
-fit <- lmFit(gse, design)
-# Make contrasts (adjust based on your comparisons)
-levels(factor(pd7$cd7))
-contrast.matrix <- makeContrasts(
-  cd7d_cd7n=CD7N - CD7P,
-  levels = design
-)
-fit2 <- contrasts.fit(fit, contrast.matrix)
-fit2 <- eBayes(fit2)
-fit2
-# Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.01)
-colnames(top_probes)
-top_probes
-colnames(annot)
-top_probes |>
-    tibble::rownames_to_column("probeid") |>
-    mutate(probe=as.numeric(probeid)) |>
-    left_join(annot, by=c("probe"="ID")) |>
-    mutate(sign=ifelse(adj.P.Val<0.0001 & abs(logFC) > 4, "Sign", "No")) |>
-    dplyr::mutate(adp=-log10(adj.P.Val)) |>
-    tidyplots::tidyplot(x=logFC, y=adp, color=sign) |>
-    tidyplots::add_data_points(alpha=.5) |>
-    tidyplots::add_data_labels_repel(label=GENE_SYMBOL, data=filter_rows(sign=="Sign"), color="black") |>
-    tidyplots::adjust_x_axis_title("Log2(Fold Change)") |>
-    tidyplots::adjust_y_axis_title("-Log10(Adjusted Pvalue)") |>
-    tidyplots::remove_legend()|>
-    tidyplots::save_plot("CD7pos_CADM1vsnoCADM1.png",
-    bg="transparent")
-
-    arrange(desc(logFC))
-    dplyr::filter(GENE_SYMBOL=="ZCCHC12")
-top_probes   
-colnames(top_probes)
-fittedebayes <- eBayes(fit)
-topTable(fittedebayes)
-summary(decideTests(fittedebayes[,5],lfc=2))
 
 ```
 

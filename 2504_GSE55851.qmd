@@ -3,12 +3,19 @@ https://aacrjournals.org/clincancerres/article/20/11/2851/78357/CADM1-Expression
 # Loading packages
 ```{r}
 pacman::p_load(
-    GEOquery, tidyverse, ggrepel, limma, oligo, DT, marray, pheatmap, tidyplots,  affy, oligoClasses, Biobase
+    GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots,  affy, oligoClasses
 )
 pacman::p_load(
     hgu133plus2.db,
-    org.Hs.eg.db, reshape2, survminer, arrayQualityMetrics, testit, biomaRt, AgiMicroRna,
+    org.Hs.eg.db, reshape2, survminer, arrayQualityMetrics, testit, biomaRt, AgiMicroRna,  Biobase, marray
 )
+
+# function
+isLog2Transformed <- function(data){
+  qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+  shouldBeLogged <- (qx[5] > 100) || (qx[6]-qx[1] > 50 && qx[2] > 0)
+  return(!shouldBeLogged)
+  }
 ```
 
 
@@ -46,9 +53,8 @@ pd <- pData(GSE55851_meta) |>
 ## Exlude HD to evaluate DE genes in CD7+CADM1- vs CD7+CADM1+
 
 pd7 = pd |>
-    dplyr::filter(atltype!="HD", cd7!="C7D")
+    dplyr::filter(atltype!="HD", cd7=="CD7N")
 
-pd7
 ### Re-read the raw files
 agilent_data <- read.maimages(
   files = paste0(".temp/GSE55851/", pd7$file),
@@ -80,14 +86,12 @@ agilent_data$genes <- annot[match(agilent_data$genes$ProbeName, annot$SPOT_ID), 
 
 
 ```{r}
+library(testit) # for assert
 # For single-channel EList (it is not obligatory)
 eset <- ExpressionSet(assayData = agilent_data$E,
                      phenoData = AnnotatedDataFrame(agilent_data$targets),
                      featureData = AnnotatedDataFrame(agilent_data$genes))
-
-
 # Sanity check
-agilent_data
 table(rowSums(is.na(agilent_data$E)))
 table(colSums(is.na(agilent_data$E)))
 
@@ -101,5 +105,175 @@ assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
 agilent_data  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
 #agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
 agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
+
+# remove those without a symbol
 agilent_data <- agilent_data[!(is.na(agilent_data$genes$ENSEMBL_ID)), ]
+        
+####################------------------------------
+# todo: averaging or take one with best FC?
+agilent_data_avg <- avereps(agilent_data, ID=agilent_data$genes$ENSEMBL_ID) # Probe name from annotations
+dim(agilent_data) # 41689   202
+dim(agilent_data_avg) # 33492   202
+
+# is it normalized?
+isLog2Transformed(agilent_data_avg$E)
+
+
+plotDensities(agilent_data_avg, main = "", legend = FALSE)
+
+
+# First perform differential expression analysis to find significant probes
+# Create design matrix based on final_subtype
+pd7$atltype
+design <- model.matrix(~0 + factor(pd7$atltype))
+design 
+rownames(design) = pd7$ID
+colnames(design) <- levels(factor(pd7$atltype))
+head(design, 20)
+
+# remove low expressing geneS
+cutoff <- median(agilent_data_avg$E)
+cutoff
+## TRUE or FALSE for whether each gene is "expressed" in each sample
+is_expressed <- agilent_data_avg$E > cutoff
+## Identify genes expressed in more than 2 samples
+keep <- rowSums(is_expressed) > 2
+## check how many genes are removed / retained.
+table(keep)
+## subset to just those expressed genes
+gse <- agilent_data_avg$E[keep,]
+
+# Fit linear model
+fit <- lmFit(gse, design)
+# Make contrasts (adjust based on your comparisons)
+levels(factor(pd7$atltype))
+contrast.matrix <- makeContrasts(
+  ATLa_ATLc= ATLa - ATLc,
+  ATLa_AC= ATLa - AC,
+  ATLc_AC= ATLc - AC,
+  levels = design
+)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+fit2
+# Get significant probes (FDR < 0.01)
+top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.05)
+colnames(top_probes)
+head(top_probes, 20)
+top_probes |>
+    tibble::rownames_to_column("probeid") |>
+    left_join(annot, by=c("probeid"="ENSEMBL_ID")) |>
+    #pull(probeid)
+    mutate(sign=ifelse(adj.P.Val<0.0001 & abs(logFC) > 4, "Sign", "No")) |>
+    dplyr::mutate(adp=-log10(adj.P.Val)) |>
+    tidyplots::tidyplot(x=logFC, y=adp, color=sign) |>
+    tidyplots::add_data_points(alpha=.5) |>
+    tidyplots::add_data_labels_repel(label=probeid, data=filter_rows(sign=="Sign"), color="black") |>
+    tidyplots::adjust_x_axis_title("Log2(Fold Change)") |>
+    tidyplots::adjust_y_axis_title("-Log10(Adjusted Pvalue)") |>
+    tidyplots::remove_legend() |>
+    tidyplots::save_plot("CD7pos_CADM1vsnoCADM1.png",
+    bg="transparent")
+
+
+top_probes |>
+  tibble::rownames_to_column("probeid") |>
+  arrange(desc(logFC)) |>
+  head(50)
+
+
+summary(decideTests(fit2[,1],lfc=1))
+
+degenes = top_probes |>
+    tibble::rownames_to_column("probeid") |>
+    left_join(annot, by=c("probeid"="ENSEMBL_ID")) |>
+    pull(probeid) 
+
+genes = agilent_data_avg$E[degenes,] |>
+  as.data.frame() |>
+  tibble::rownames_to_column("ENSEMBL_ID") |>
+  left_join(annot[,c("ENSEMBL_ID", "GENE_SYMBOL")], by=c("ENSEMBL_ID")) |>
+  tibble::column_to_rownames("GENE_SYMBOL") |>
+  dplyr::select(-ENSEMBL_ID) |>
+  as.matrix()
+
+pd7m = pd7 |>
+  tibble::column_to_rownames("ID")
+
+
+# 1. Prepare annotation data - ensure it's properly formatted
+annotation_data <- data.frame(
+  ATLType = factor(pd7m$atltype),  # Convert to factor explicitly
+  row.names = rownames(pd7m)       # Ensure this matches your column names in 'genes'
+)
+
+# 2. Verify the annotation data
+print(head(annotation_data))
+print(table(annotation_data$ATLType))
+
+# 3. Create color mapping - ensure colors match actual factor levels
+categories <- levels(annotation_data$ATLType)  # Use levels() instead of unique()
+n_categories <- length(categories)
+
+# Check if we have enough colors
+if(n_categories != 3) {
+  warning(paste("You have", n_categories, "categories but provided 3 colors"))
+  # Generate enough colors if needed
+  colors <- colorRampPalette(c("#66C2A5", "#FC8D62", "#8DA0CB"))(n_categories)
+} else {
+  colors <- c("#66C2A5", "#FC8D62", "#8DA0CB")
+}
+
+annotation_colors <- list(
+  ATLType = setNames(colors, categories)
+)
+
+# 4. Verify matrix and annotation dimensions
+stopifnot(
+  identical(colnames(genes), rownames(annotation_data)),
+  ncol(genes) == nrow(annotation_data)
+)
+
+# 5. Create the heatmap with error handling
+
+pheatmap(
+    mat = genes,
+    scale = "row",
+    annotation_col = annotation_data,
+    annotation_colors = annotation_colors,
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    main = "Differential gene expression of CD4+CD7-CADM1+ by Status",
+  filename = "publication_heatmap.png",
+  width = 7,  # Nature standard single-column
+  height = 5,
+  units = "in",
+  family = "Arial"  # Embed font
+)
+
+
+annotation_data <- data.frame(
+  ATLType = pd7$atltype,  # Replace 'atltype' with your actual column name
+  row.names = rownames(pd7m)  # Must match your sample names
+)
+annotation_data 
+
+categories <- unique(annotation_data$ATLType)
+
+annotation_colors <- list(
+  ATLType = c("#66C2A5", "#FC8D62", "#8DA0CB")  # Must match factor levels
+)
+names(annotation_colors$ATLType) <- levels(annotation_data$ATLType)
+
+pheatmap(
+  mat = genes,
+  scale = "row",
+  annotation_col = annotation_data,
+  annotation_colors = annotation_colors,
+  show_rownames = TRUE,  # Often better for large datasets
+  show_colnames = FALSE,
+  main = "Gene Expression by ATL Type"
+)
+colors
+annotation_data
 ```
