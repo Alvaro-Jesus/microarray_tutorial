@@ -91,6 +91,9 @@ AffyBatch -\> ExpressionSet
 `featureData(GSE55851)`\`#Probeset data
 
 ## Tutorials
+https://gtk-teaching.github.io/Microarrays-R/
+https://github.com/wkzawadzka/bioanalysis/blob/master/microarrays/workflows/agilent/workflow.R
+https://github.com/NelleV/2019timecourse-rnaseq-pipeline/blob/e345b60679c6f24e02b54b63ab59c46e75d65481/scripts/miscellaneous/normalization.Rmd#L17
 
 ### 1. Loading packages
 
@@ -136,6 +139,12 @@ For Agilent files, important columns are typically:
 - gMedianSignal (foreground)
 - gBGMedianSignal (background)
 - gIsWellAboveBG (quality flag)
+
+ExpressionFeatureSet - Array
+GeneFeatureSet
+
+The function, rma() from the affy package takes in an AffyBatch object. The function basicRMA() from the oligo package takes in an ExpressionFeatureSet object. 
+
 ```{r}
 options(GEOquery.integrate.https = FALSE)
 softgse = getGEO("GSE55851", GSEMatrix=FALSE, destdir=".temp" ) #GSEMatrix will download a soft vs matrix (GSE vs ExpressionSet)
@@ -168,6 +177,8 @@ agilent_data <- read.maimages(
   other.columns = "gIsWellAboveBG"  # Quality flag (if column exists)
 )
 
+
+
 # After successful read
 # Correct background (recommended: "normexp" for Agilent)
 bg_corrected <- limma::backgroundCorrect(agilent_data, method = "normexp") #offset = 50)
@@ -182,10 +193,13 @@ isLog2Transformed(normalized_data$E)
 plotDensities(normalized_data, legend = FALSE)
 ### method 2, if it contains p-values
 agilent_data <- read.maimages(files = list.files(".temp/GSE55851", pattern = "\\.txt\\.gz$", full.names = TRUE), source = "agilent", green.only = TRUE)
+agilent_data
+
+
 normalized_data <- limma::neqc(agilent_data)
 # Optional: Log2 transform (if not done automatically)
 # normalized_data$E <- log2(normalized_data$E)
-
+# exploratory analysis -----------------------------------------
 
 pca <- prcomp(t(normalized_data$E))
 plot(pca$x[, 1:2], pch = 19, col = "blue", main = "PCA Plot")
@@ -203,11 +217,12 @@ normalized_data <- normalized_data[!is_control, ]
 
 ############## Annotation
 gpl_annot <- read.delim(gzfile(".temp/GSE55851/GPL/GPL10332_old_annotations.txt.gz"), skip=21)
+colnames(gpl_annot)
+head(gpl_annot$CYTOBAND, 100)
 gpl_annot |>
-  filter(str_detect(CHROMOSOMAL_LOCATION, "chrX")) |>
-  separate(
-  CHROMOSOMAL_LOCATION,
-  into = c("CHROMOSOME", "LOCATION"),  # New column names
+  filter(str_detect(CHROMOSOMAL_LOCATION, "chrX"), str_detect(CYTOBAND, "Xq24")) |>
+  dplyr::select(1:2,8:10, 16) |>
+  separate(CHROMOSOMAL_LOCATION, into = c("CHROMOSOME", "LOCATION"),  # New column names
   sep = ":"
 ) |>
   separate(
@@ -215,26 +230,18 @@ gpl_annot |>
   into = c("START", "END"),  # New column names
   sep = "-"
 ) |>
- mutate(
-    genint = ifelse(
-      between(as.numeric(START), 117957753, 117960931) & 
-      between(as.numeric(END), 117957753, 117960931),
-      "YES", 
-      "NO"
-    )
-  ) |>
-  # Filter for probes fully within the interval
-  filter(genint == "YES")
-
+ filter(as.numeric(START)> 107907753, as.numeric(END)<127990931)
+ 
 zinc_finger_probes <- gpl_annot[gpl_annot$CHROMOSOME == "20" & 
                                 gpl_annot$START >= 61678917 & 
                                 gpl_annot$END <= 61682078, ]
-zinc_finger_probes <- gpl_annot[grep("ZCCHC12|CCHC.*12|54800", 
+zinc_finger_probes <- gpl_annot[grep("HBZ", 
                                     gpl_annot$GENE_SYMBOL, 
                                     ignore.case = TRUE), ]
 zinc_finger_probes
-gpl2 = getGEO("GPL10332")
-annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID")]
+
+
+annot
 annot |>
   filter("ENSEMBL_ID"=="ENST00000310164.3")
 # Map to your data
@@ -242,6 +249,190 @@ normalized_data$genes <- annot[match(rownames(normalized_data), annot$ID), ]
 # This is a list matrix file
 softgse = softgse[[1]]
 softgse
+
+```
+
+```{r}
+library(Biobase)
+#____________________________________________________________
+
+# For single-channel EList
+eset <- ExpressionSet(assayData = agilent_data$E,
+                     phenoData = AnnotatedDataFrame(agilent_data$targets),
+                     featureData = AnnotatedDataFrame(agilent_data$genes))
+
+
+
+############ #Another method
+ensembl <- useMart('ensembl', dataset = 'hsapiens_gene_ensembl')
+
+library(biomaRt)
+ensembl <- useMart('ensembl', dataset = 'hsapiens_gene_ensembl')
+tables <- listAttributes(ensembl)
+tables[grep('agilent', tables[,1]),] # look for our version
+# # Platform: GPL1708	Agilent-012391 Whole Human Genome Oligo Microarray G4112A (Feature Number version)
+# annot <- getBM(
+#   attributes = c('agilent_gpl6848',
+#                  'wikigene_description',
+#                  'ensembl_gene_id',
+#                  'entrezgene_id',
+#                  'gene_biotype',
+#                  'external_gene_name'),
+#   filters = 'agilent_gpl6848',
+#   values = probes,
+#   mart = ensembl)
+# annot <- merge(
+#   x = as.data.frame(probes),
+#   y =  annot,
+#   by.y = 'agilent_gpl6848',
+#   all.x = T,
+#   by.x = 'probes')
+# 
+# annotEntrez <- annot[!is.na(annot$entrezgene_id),]
+# annotEntrez <- annotEntrez[which(annotEntrez$probes %in% RG$genes$ProbeName),]
+# annotEntrez <- annotEntrez[match(RG$genes$ProbeName, annotEntrez$probes),]
+# table(RG$genes$ProbeName == annotEntrez$probes) # check allignment
+# 
+# write.table(
+#   annotEntrez,
+#   paste0(accesion_number, '/Annotations_', gsub("-", "_", as.character(Sys.Date())), '.tsv'),
+#   sep = '\t',
+#   row.names = FALSE,
+#   quote = FALSE)
+# 
+# RG$genes$Entrez <- annotEntrez$entrezgene_id
+# #RG$genes$Ensembl <- annotations$ENSEMBL_ID
+# RG$genes$GeneName <- annotEntrez$external_gene_name
+
+
+# Sanity check
+agilent_data
+table(rowSums(is.na(agilent_data$E)))
+table(colSums(is.na(agilent_data$E)))
+head(agilent_data$genes)
+
+gene_freq = as.data.frame(table(agilent_data$genes$GENE_SYMBOL, useNA="ifany"))
+gene_freq
+gene_freq = gene_freq[order(-gene_freq$Freq),]
+gene_freq[1:20,]
+
+# Check genes composition
+ggplot(gene_freq[1:50,], aes(x = Freq, y = reorder(Var1, Freq))) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_text(aes(label = Freq), hjust = -0.1, size = 3) +
+  labs(x = "Frequency", y = "Probe/Gene name") +
+  theme_minimal() # most control 
+
+# "3 tables"
+# check if # of rows in pdata is same and cols in edata
+# and rows of edata match rows of fdata
+assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
+assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
+
+
+
+# Quality control
+agilent_data  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
+#agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
+agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
+agilent_data <- agilent_data[!(is.na(agilent_data$genes$ENSEMBL_ID)), ]
+
+# genes with multiple "copies" across the genome 
+# todo: averaging or take one with best FC?
+
+agilent_data_avg <- avereps(agilent_data, ID=agilent_data$genes$ENSEMBL_ID) # Probe name from annotations
+dim(agilent_data) # 41689   202
+dim(agilent_data_avg) # 33492   202
+
+head(agilent_data$genes)
+unique(agilent_data$genes$SPOT_ID)
+
+# account for multiple probes
+agilent_data_qc = avereps(agilent_data_avg, ID=agilent_data_avg$genes$ID)
+dim(agilent_data_qc) # 41689   202
+dim(agilent_data_avg) # 41001   202
+
+# is it normalized?
+isLog2Transformed(agilent_data_qc$E)
+
+oligo::hist(agilent_data$E)
+plotDensities(agilent_data, main = "", legend = FALSE)
+plotDensities(agilent_data_qc, main = "", legend = FALSE)
+title(main = "Within- and between-\narray normalized", cex.main = title_size)
+         
+####################------------------------------
+# First perform differential expression analysis to find significant probes
+agilent_data_qc
+# Create design matrix based on final_subtype
+design <- model.matrix(~0 + factor(pd7$cd7))
+design 
+# remove low expressing geneS
+cutoff <- median(agilent_data_qc$E)
+cutoff
+## TRUE or FALSE for whether each gene is "expressed" in each sample
+is_expressed <- agilent_data_qc$E > cutoff
+## Identify genes expressed in more than 2 samples
+keep <- rowSums(is_expressed) > 2
+
+## check how many genes are removed / retained.
+table(keep)
+
+## subset to just those expressed genes
+gse <- agilent_data_qc$E[keep,]
+
+gse = agilent_data_qc$E
+rownames(design) = pd7$ID
+design
+colnames(design) <- levels(factor(pd7$cd7))
+head(design, 20)
+
+# Sanity check
+all(colnames(gse) == rownames(design))
+colnames(gse)
+rownames(gse) 
+
+# a test for gse["29693", ] 
+
+gse["29693", ] 
+
+# Fit linear model
+fit <- lmFit(gse, design)
+# Make contrasts (adjust based on your comparisons)
+levels(factor(pd7$cd7))
+contrast.matrix <- makeContrasts(
+  cd7d_cd7n=CD7N - CD7P,
+  levels = design
+)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+fit2
+# Get significant probes (FDR < 0.01)
+top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.01)
+colnames(top_probes)
+top_probes
+colnames(annot)
+top_probes |>
+    tibble::rownames_to_column("probeid") |>
+    mutate(probe=as.numeric(probeid)) |>
+    left_join(annot, by=c("probe"="ID")) |>
+    mutate(sign=ifelse(adj.P.Val<0.0001 & abs(logFC) > 4, "Sign", "No")) |>
+    dplyr::mutate(adp=-log10(adj.P.Val)) |>
+    tidyplots::tidyplot(x=logFC, y=adp, color=sign) |>
+    tidyplots::add_data_points(alpha=.5) |>
+    tidyplots::add_data_labels_repel(label=GENE_SYMBOL, data=filter_rows(sign=="Sign"), color="black") |>
+    tidyplots::adjust_x_axis_title("Log2(Fold Change)") |>
+    tidyplots::adjust_y_axis_title("-Log10(Adjusted Pvalue)") |>
+    tidyplots::remove_legend()|>
+    tidyplots::save_plot("CD7pos_CADM1vsnoCADM1.png",
+    bg="transparent")
+
+    arrange(desc(logFC))
+    dplyr::filter(GENE_SYMBOL=="ZCCHC12")
+top_probes   
+colnames(top_probes)
+fittedebayes <- eBayes(fit)
+topTable(fittedebayes)
+summary(decideTests(fittedebayes[,5],lfc=2))
 
 ```
 
@@ -259,7 +450,7 @@ gene_info <- getBM(
   values = "ZCCHC12",  # Replace with your gene of interest
   mart = ensembl
 )
-
+gene_info
 # Define the target region (±100kb)
 target_region <- GRanges(
   seqnames = gene_info$chromosome_name,

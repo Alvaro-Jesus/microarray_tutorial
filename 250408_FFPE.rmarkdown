@@ -2,6 +2,8 @@
 # Gene Expression Signatures for the Accurate Diagnosis of Peripheral T-Cell Lymphoma Entities in the Routine Clinical Practice
 
 CEL > SOFT > Matrix
+
+
 ```{r}
 # Loading packages
 pacman::p_load(httpgd,
@@ -94,7 +96,6 @@ atl_ptcl = metadata |>
 
 ```
 
-
 ```{r}
 # Function to check if its log transformed
 isLog2Transformed <- function(data){
@@ -129,7 +130,7 @@ exprs_wider <- exprs_long |>
     values_from = Expression
   )
 
-fig=exprs_wider |>
+exprs_wider |>
   filter(ProbeID == "IL13RA1") |>
   pivot_longer(
     cols = -ProbeID,
@@ -138,15 +139,9 @@ fig=exprs_wider |>
     values_drop_na = TRUE 
   ) |>
   left_join(atl_ptcl, by=c("Sample"="geo_accession")) |>
-  group_by(final_subtype) |>
-  summarise(
-    median_expression = median(Expression, na.rm = TRUE),
-    n_samples = n()
-  )
   tidyplots::tidyplot(x=final_subtype, y=Expression, color=final_subtype) |>
   tidyplots::add_data_points()
 
-print(fig)
 
 
 
@@ -162,7 +157,6 @@ sum(is.na(exprs_clean)) # return 0 after removing NAs
 
 
 ```
-
 
 ```{r}
 ########## initial visualization
@@ -200,7 +194,6 @@ write_csv(full_output, path="gse_full_output.csv")
 # to check if there is annotation?
 rownames(fData(gset))
 ```
-
 
 ```{r}
 # First perform differential expression analysis to find significant probes
@@ -314,7 +307,6 @@ d = exprs_sig %>%
 d 
 ```
 
-
 ```{r}
 my_genes <- c("HIG2", "CA1","ETV4","FOXA1")
 
@@ -324,5 +316,8 @@ anno <- AnnotationDbi::select(org.Hs.eg.db,
                               keytype = "SYMBOL")
 ```
 
+
+
 https://github.com/kassambara/survminer
 https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html#Introduction
+
