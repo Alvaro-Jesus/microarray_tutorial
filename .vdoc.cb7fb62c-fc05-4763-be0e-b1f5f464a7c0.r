@@ -1,18 +1,18 @@
-
-https://aacrjournals.org/clincancerres/article/20/11/2851/78357/CADM1-Expression-and-Stepwise-Downregulation-of
-# Loading packages
-```{r}
+#
+#
+#
+#
 pacman::p_load(
-    GEOquery, tidyverse, ggrepel, limma, oligo, DT, marray, pheatmap, tidyplots,  affy, oligoClasses, Biobase
+    GEOquery, tidyverse, ggrepel, limma, oligo, DT, marray, pheatmap, tidyplots, data.table, biomaRt, gplots, AgiMicroRna, affy, oligoClasses, Biobase
 )
 pacman::p_load(
     hgu133plus2.db,
-    org.Hs.eg.db, reshape2, survminer, arrayQualityMetrics, testit, biomaRt, AgiMicroRna,
+    org.Hs.eg.db, reshape2, survminer, arrayQualityMetrics, testit
 )
-```
-
-
-```{r}
+#
+#
+#
+#
 # First obtain metadata
 GSE55851_meta = getGEO("GSE55851", GSEMatrix=TRUE, destdir=".temp" ) 
 GSE55851_meta=GSE55851_meta[[1]]
@@ -76,11 +76,11 @@ annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_
 agilent_data$genes <- annot[match(agilent_data$genes$ProbeName, annot$SPOT_ID), ]
 
 
-```
-
-
-```{r}
-# For single-channel EList (it is not obligatory)
+#
+#
+#
+#
+# For single-channel EList
 eset <- ExpressionSet(assayData = agilent_data$E,
                      phenoData = AnnotatedDataFrame(agilent_data$targets),
                      featureData = AnnotatedDataFrame(agilent_data$genes))
@@ -90,6 +90,7 @@ eset <- ExpressionSet(assayData = agilent_data$E,
 agilent_data
 table(rowSums(is.na(agilent_data$E)))
 table(colSums(is.na(agilent_data$E)))
+head(agilent_data$genes)
 
 # "3 tables"
 # check if # of rows in pdata is same and cols in edata
@@ -97,9 +98,13 @@ table(colSums(is.na(agilent_data$E)))
 assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
 assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
 
+
+
 # Quality control
 agilent_data  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
 #agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
 agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
 agilent_data <- agilent_data[!(is.na(agilent_data$genes$ENSEMBL_ID)), ]
-```
+#
+#
+#

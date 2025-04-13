@@ -256,10 +256,7 @@ softgse
 library(Biobase)
 #____________________________________________________________
 
-# For single-channel EList
-eset <- ExpressionSet(assayData = agilent_data$E,
-                     phenoData = AnnotatedDataFrame(agilent_data$targets),
-                     featureData = AnnotatedDataFrame(agilent_data$genes))
+
 
 
 
@@ -305,11 +302,6 @@ tables[grep('agilent', tables[,1]),] # look for our version
 # RG$genes$GeneName <- annotEntrez$external_gene_name
 
 
-# Sanity check
-agilent_data
-table(rowSums(is.na(agilent_data$E)))
-table(colSums(is.na(agilent_data$E)))
-head(agilent_data$genes)
 
 gene_freq = as.data.frame(table(agilent_data$genes$GENE_SYMBOL, useNA="ifany"))
 gene_freq
@@ -322,20 +314,6 @@ ggplot(gene_freq[1:50,], aes(x = Freq, y = reorder(Var1, Freq))) +
   geom_text(aes(label = Freq), hjust = -0.1, size = 3) +
   labs(x = "Frequency", y = "Probe/Gene name") +
   theme_minimal() # most control 
-
-# "3 tables"
-# check if # of rows in pdata is same and cols in edata
-# and rows of edata match rows of fdata
-assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
-assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
-
-
-
-# Quality control
-agilent_data  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
-#agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
-agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
-agilent_data <- agilent_data[!(is.na(agilent_data$genes$ENSEMBL_ID)), ]
 
 # genes with multiple "copies" across the genome 
 # todo: averaging or take one with best FC?
