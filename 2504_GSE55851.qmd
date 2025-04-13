@@ -72,7 +72,6 @@ as_tibble(rownames = "sampleName") |>
 
 #### gene Annotation
 gpl2 = getGEO("GPL10332")
-head(Table(gpl2))
 annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_TYPE")]
 annot$SPOT_ID
 head(agilent_data$genes$ProbeName, 100)
