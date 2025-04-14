@@ -91,9 +91,8 @@ AffyBatch -\> ExpressionSet
 `featureData(GSE55851)`\`#Probeset data
 
 ## Tutorials
-https://gtk-teaching.github.io/Microarrays-R/
-https://github.com/wkzawadzka/bioanalysis/blob/master/microarrays/workflows/agilent/workflow.R
-https://github.com/NelleV/2019timecourse-rnaseq-pipeline/blob/e345b60679c6f24e02b54b63ab59c46e75d65481/scripts/miscellaneous/normalization.Rmd#L17
+
+https://gtk-teaching.github.io/Microarrays-R/ https://github.com/wkzawadzka/bioanalysis/blob/master/microarrays/workflows/agilent/workflow.R https://github.com/NelleV/2019timecourse-rnaseq-pipeline/blob/e345b60679c6f24e02b54b63ab59c46e75d65481/scripts/miscellaneous/normalization.Rmd#L17
 
 ### 1. Loading packages
 
@@ -130,15 +129,11 @@ library(reshape2)
 
 The affy package also has a list.celfiles() function (with a slightly different interface), and offers a read.AffyBatch() function to read celfiles. However, the affy package can only work with 3′ biased Affymetrix arrays, so oligo is preferred
 
-For Agilent files, important columns are typically:
-- gMedianSignal (foreground)
-- gBGMedianSignal (background)
-- gIsWellAboveBG (quality flag)
+For Agilent files, important columns are typically: - gMedianSignal (foreground) - gBGMedianSignal (background) - gIsWellAboveBG (quality flag)
 
-ExpressionFeatureSet - Array
-GeneFeatureSet
+ExpressionFeatureSet - Array GeneFeatureSet
 
-The function, rma() from the affy package takes in an AffyBatch object. The function basicRMA() from the oligo package takes in an ExpressionFeatureSet object. 
+The function, rma() from the affy package takes in an AffyBatch object. The function basicRMA() from the oligo package takes in an ExpressionFeatureSet object.
 
 ```{r}
 options(GEOquery.integrate.https = FALSE)
@@ -335,6 +330,7 @@ nearby_genes
 # Filter out the target gene itself
 nearby_genes <- nearby_genes[nearby_genes$hgnc_symbol != "BRCA1", ]
 ```
+
 ```{r}
 rm(list=ls())
 
