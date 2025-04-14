@@ -1,4 +1,3 @@
-
 ```{r}
 pacman::p_load(
     GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots, affy, oligoClasses, testit
@@ -12,7 +11,7 @@ isLog2Transformed <- function(data) {
 
 
 # First obtain metadata
-id <- "GSE33615"
+id <- "GSE19080"
 
 
 # creating a temp folder
@@ -28,45 +27,30 @@ meta <- meta[[1]]
 meta
 varLabels(meta)
 head(pData(meta))
+meta
 
 
 # GPL4133
 pd
 pd <- pData(meta) |>
     tibble::rownames_to_column("ID") |>
-    dplyr::select("characteristics_ch1.1", "characteristics_ch1.2", "characteristics_ch1.3", ID, supplementary_file) |>
+    dplyr::select("characteristics_ch1", "characteristics_ch1.3", ID, supplementary_file) |>
     dplyr::mutate(file = str_split(supplementary_file, "/") |> map_chr(tail, 1)) |>
-    dplyr::rename(atl_subtype = "characteristics_ch1.1", age = "characteristics_ch1.2", gender = "characteristics_ch1.3") |>
+    dplyr::rename(atl_subtype = "characteristics_ch1", gender = "characteristics_ch1.3") |>
     dplyr::mutate(across(
-        c(atl_subtype, age, gender),
+        c(atl_subtype,  gender),
         ~ stringr::str_remove(., "^.*: ")
     )) |>
-    mutate(atl_subtype2 = dplyr::recode_factor(atl_subtype,
-        "Acute" = "ATLa",
-        "Lymphoma" = "ATLa",
-        "Chronic" = "ATLc",
-        "Smoldering" = "ATLc",
-        "HTLV-1 uninfected" = "HD",
-    )) |>
-    dplyr::filter(atl_subtype2 != "Unkown")
-
+    mutate(atl_subtype2 = case_when(
+        str_detect(atl_subtype, "ATL") ~ "ATL",
+        str_detect(atl_subtype, "HAM") ~ "HAMTSP",
+        str_detect(atl_subtype, "AC") ~ "AC",
+        str_detect(atl_subtype, "Healthy") ~ "HD",
+        .default=NA))
+        
 pd7 <- pd
-pd7 <- pd |>
-    mutate(
-        agec = cut(as.numeric(age), right = F, breaks = c(0, 65, Inf), labels = c("young", "older")),
-        ATLaa = case_when(
-            agec == "young" & atl_subtype2 == "ATLa" ~ "youngATL",
-            agec == "older" & atl_subtype2 == "ATLa" ~ "oldATL",
-            agec == "young" & atl_subtype2 == "ATLc" ~ "youngATLc",
-            agec == "older" & atl_subtype2 == "ATLc" ~ "oldATLc",
-            .default = NA
-        )
-    ) #|>
-    filter(!is.na(ATLaa))
-
-dim(pd7)
-
-table(pd7$ATLaa)
+table(pd7$atl_subtype2)
+pd7$file
 ## A loop to download all the files in the .temp of this environment
 for (i in 1:length(pd7$supplementary_file)) {
     url <- pd7$supplementary_file[i]
@@ -87,19 +71,22 @@ for (i in 1:length(pd7$supplementary_file)) {
     }
 }
 
+head(read.delim(gzfile(paste0(".temp/", id, "/", pd7$file[1])), sep="\t", skip=25), 30) 
+pd7
 ### Re-read the raw files
 agilent_data <- read.maimages(
     files = paste0(".temp/", id, "/", pd7$file),
-    source = "agilent",
-    green.only = TRUE,
+    source =  "quantarray",
+    green.only = FALSE,
     names = pd7$ID,
-    columns = list(
-        E = "gMedianSignal", # Foreground signal
-        Eb = "gBGMedianSignal" # Background signal
-    ),
-    other.columns = "gIsWellAboveBG" # Quality flag (if column exists)
+    #columns = list(
+    #    E = "gMedianSignal", # Foreground signal
+    #    Eb = "gBGMedianSignal" # Background signal
+    #),
+    #other.columns = "gIsWellAboveBG" # Quality flag (if column exists)
 )
 # Convert targets to tibble for easy joining
+agilent_data$targets
 agilent_data$targets <- agilent_data$targets |>
     as_tibble(rownames = "sampleName") |>
     left_join(pd7, by = c("sampleName" = "ID")) |>
@@ -197,47 +184,6 @@ agilent_qc <- function(
 
 gse_final <- agilent_qc(agilent_data)
 
-####LI parenthesis
-annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_TYPE")]
-
-annot |>
-    dplyr::filter(GENE_SYMBOL %in% genes_li)
-genes_li = c( "NT5E", "ADORA1", "ADORA2A", "ADORA2B", "ADORA3") #"ENTPD1"
-df_li = gse_final$genes |>
-    dplyr::filter(GENE_SYMBOL %in% genes_li) |>
-    pull(ENSEMBL_ID)
-df_li
-
-genes_lidf = gse_final$E[df_li,] |>
-  as.data.frame() |>
-  tibble::rownames_to_column("ENSEMBL_ID") |>
-  left_join(annot[,c("ENSEMBL_ID", "GENE_SYMBOL")], by=c("ENSEMBL_ID")) |>
-  pivot_longer(-c(GENE_SYMBOL,ENSEMBL_ID) , names_to="sample", values_to="Exp")
-pd7m = pd7 |>
-    mutate(atl=ifelse(str_detect(atl_subtype, "uninfected"), "HD", "ATL"))
-pd7m
-genes_lidf = genes_lidf |>
-    left_join(pd7m[,c("atl", "ID")], by=c("sample"="ID"))
-
-genes_lidf |>
-    tidyplots::tidyplot(x=GENE_SYMBOL , y=Exp, color=atl) |>
-    tidyplots::add_boxplot() |>
-    tidyplots::add_data_points_jitter() |>
-    tidyplots::add_test_pvalue() |>
-    tidyplots::remove_caption() |>
-    tidyplots::save_plot("Liplot.png", bg="transparent") 
-
-head(genes_lidf)
-colnames(pd)  
-  tibble::column_to_rownames("GENE_SYMBOL") |>
-  dplyr::select(-ENSEMBL_ID) |>
-  as.matrix()
-gse_final[,]
-
-genes_lidf
-
-
-#####
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
 pd7
