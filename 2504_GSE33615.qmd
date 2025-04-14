@@ -196,7 +196,7 @@ agilent_qc <- function(
 
 
 gse_final <- agilent_qc(agilent_data)
-
+###############################################
 ####LI parenthesis
 annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_TYPE")]
 
@@ -227,17 +227,8 @@ genes_lidf |>
     tidyplots::remove_caption() |>
     tidyplots::save_plot("Liplot.png", bg="transparent") 
 
-head(genes_lidf)
-colnames(pd)  
-  tibble::column_to_rownames("GENE_SYMBOL") |>
-  dplyr::select(-ENSEMBL_ID) |>
-  as.matrix()
-gse_final[,]
-
-genes_lidf
-
-
-#####
+###################################
+######################################################
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
 pd7
