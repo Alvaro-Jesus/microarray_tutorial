@@ -1,5 +1,5 @@
-
-```{r}
+#
+#
 pacman::p_load(
     GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots,  affy, oligoClasses, testit
 )
@@ -201,4 +201,6 @@ top_probes |>
     arrange(desc(ATLa_ATLc)) |>
     head(50)
 
-```
+#
+#
+#

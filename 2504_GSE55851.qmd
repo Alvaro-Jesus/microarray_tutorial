@@ -3,7 +3,7 @@ https://aacrjournals.org/clincancerres/article/20/11/2851/78357/CADM1-Expression
 # Loading packages
 ```{r}
 pacman::p_load(
-    GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots,  affy, oligoClasses
+    GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots,  affy, oligoClasses, testit
 )
 pacman::p_load(
     hgu133plus2.db,
@@ -86,49 +86,74 @@ agilent_data$genes <- annot[match(agilent_data$genes$ProbeName, annot$SPOT_ID), 
 
 
 ```{r}
-library(testit) # for assert
+
 # For single-channel EList (it is not obligatory)
 eset <- ExpressionSet(assayData = agilent_data$E,
                      phenoData = AnnotatedDataFrame(agilent_data$targets),
                      featureData = AnnotatedDataFrame(agilent_data$genes))
-# Sanity check
-table(rowSums(is.na(agilent_data$E)))
-table(colSums(is.na(agilent_data$E)))
 
-# "3 tables"
-# check if # of rows in pdata is same and cols in edata
-# and rows of edata match rows of fdata
-assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
-assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
-
-# Quality control
-agilent_data  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
-#agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
-agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
-
-# remove those without a symbol
-agilent_data <- agilent_data[!(is.na(agilent_data$genes$ENSEMBL_ID)), ]
-        
-####################------------------------------
-# todo: averaging or take one with best FC?
-agilent_data_avg <- avereps(agilent_data, ID=agilent_data$genes$ENSEMBL_ID) # Probe name from annotations
-dim(agilent_data) # 41689   202
-dim(agilent_data_avg) # 33492   202
-
-# is it normalized?
-isLog2Transformed(agilent_data_avg$E)
-
-
-plotDensities(agilent_data_avg, main = "", legend = FALSE)
-
+agilent_qc = function(
+  agilent_data,
+  max_row_na = 0.1 * ncol(agilent_data$E),  # Allow 10% 
+  max_col_na = 0.1 * nrow(agilent_data$E)
+  ){
+    # Calculate NA statistics
+    row_na_counts <- rowSums(is.na(agilent_data$E))
+    col_na_counts <- colSums(is.na(agilent_data$E))
+    # Print summary tables
+    message("\nMissing values per ROW (probe/gene):")
+    print(table(row_na_counts))
+    message("\nMissing values per COLUMN (sample):")
+    print(table(col_na_counts))
+    # Check for critical issues
+    problematic_rows <- sum(row_na_counts > max_row_na)
+    problematic_cols <- sum(col_na_counts > max_col_na)
+    
+    if (problematic_rows > 0 || problematic_cols > 0){
+    stop(
+      sprintf(
+        "\nSANITY CHECK FAILED:\n- %d probes/genes exceed %d missing values\n- %d samples exceed %d missing values\n",
+        problematic_rows, max_row_na,
+        problematic_cols, max_col_na
+        ),
+        call. = FALSE)} 
+    else {
+    message("\nSANITY CHECK PASSED: No excessive missing values detected")}
+    # "3 tables"
+    # check if # of rows in pdata is same and cols in edata
+    # and rows of edata match rows of fdata
+    assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
+    assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
+    message("\nSANITY CHECK PASSED: All data match between rows and columns")
+    # Quality control
+    message("\nQC: background correction")
+    agilent_data_qc  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
+    #agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
+    message("\nQC: normalize between arrays")
+    agilent_data_nor <- limma::normalizeBetweenArrays(agilent_data_qc, method="quantile")
+    # remove those without a symbol
+    message("\nQC: removing those without a symbol")
+    agilent_data_rem <- agilent_data_nor[!(agilent_data_nor$genes$ENSEMBL_ID==""), ] #considering "" as empty
+    # todo: averaging or take one with best FC?
+    message("\nQC: average for repetitives")
+    agilent_data_avg <- avereps(agilent_data_rem, ID=agilent_data_rem$genes$ENSEMBL_ID) #Probe name from annotations
+    message("\nQC: final dimensions")
+    print(dim(agilent_data_avg)) # 33492   202
+    # is it normalized?
+    message("\nIs it normalized:")
+    print(isLog2Transformed(agilent_data_avg$E))
+    message("\nDensities plot ->:")
+    plotDensities(agilent_data_avg, main = "", legend = FALSE)
+    return(agilent_data_avg)
+    }
 
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
-pd7$atltype
-design <- model.matrix(~0 + factor(pd7$atltype))
+pd7
+design <- model.matrix(~0 + factor(pd7$atl_subtype2))
 design 
 rownames(design) = pd7$ID
-colnames(design) <- levels(factor(pd7$atltype))
+colnames(design) <- levels(factor(pd7$atl_subtype2))
 head(design, 20)
 
 # remove low expressing geneS
@@ -146,23 +171,25 @@ gse <- agilent_data_avg$E[keep,]
 # Fit linear model
 fit <- lmFit(gse, design)
 # Make contrasts (adjust based on your comparisons)
-levels(factor(pd7$atltype))
+levels(factor(pd7$atl_subtype2))
 contrast.matrix <- makeContrasts(
   ATLa_ATLc= ATLa - ATLc,
-  ATLa_AC= ATLa - AC,
-  ATLc_AC= ATLc - AC,
+  ATLa_HD= ATLa - HD,
+  ATLc_HD= ATLc - HD,
   levels = design
 )
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 fit2
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.05)
+top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.01)
 colnames(top_probes)
 head(top_probes, 20)
 top_probes |>
     tibble::rownames_to_column("probeid") |>
     left_join(annot, by=c("probeid"="ENSEMBL_ID")) |>
+    arrange(desc(ATLa_ATLc)) |>
+    head(50)
     #pull(probeid)
     mutate(sign=ifelse(adj.P.Val<0.0001 & abs(logFC) > 4, "Sign", "No")) |>
     dplyr::mutate(adp=-log10(adj.P.Val)) |>
