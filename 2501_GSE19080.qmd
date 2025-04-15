@@ -27,7 +27,7 @@ meta <- meta[[1]]
 meta
 varLabels(meta)
 head(pData(meta))
-meta
+colnames(exprs(meta))
 
 
 # GPL4133
@@ -47,10 +47,10 @@ pd <- pData(meta) |>
         str_detect(atl_subtype, "AC") ~ "AC",
         str_detect(atl_subtype, "Healthy") ~ "HD",
         .default=NA))
-        
-pd7 <- pd
+      
+
 table(pd7$atl_subtype2)
-pd7$file
+
 ## A loop to download all the files in the .temp of this environment
 for (i in 1:length(pd7$supplementary_file)) {
     url <- pd7$supplementary_file[i]
@@ -71,32 +71,68 @@ for (i in 1:length(pd7$supplementary_file)) {
     }
 }
 
-head(read.delim(gzfile(paste0(".temp/", id, "/", pd7$file[1])), sep="\t", skip=25), 30) 
-pd7
+# exploring one file
+
+con <- gzfile(file.path("/Users/denriquez/Documents/GitHub/microarray_tutorial/.temp/GSE19080/GSM472372_HISH0553.txt.gz"))
+file_lines <- readLines(con, n=50)
+close(con)
+file_lines
+
 ### Re-read the raw files
-agilent_data <- read.maimages(
-    files = paste0(".temp/", id, "/", pd7$file),
-    source =  "quantarray",
+pd7 = pd |>
+    filter(ID%in%c(paste0("GSM4723", c(56:73, 82:93))))
+pd7
+agilent_data1 <- read.maimages(
+    files = file.path(".temp", id, pd7$file),
+    source = "agilent",
     green.only = FALSE,
     names = pd7$ID,
-    #columns = list(
-    #    E = "gMedianSignal", # Foreground signal
-    #    Eb = "gBGMedianSignal" # Background signal
-    #),
-    #other.columns = "gIsWellAboveBG" # Quality flag (if column exists)
+    columns = list(
+        R = "ch1 Ratio",      # Red channel (Cy5)
+        G = "ch2 Ratio",      # Green channel (Cy3)
+        Rb = "ch1 Percent",   # Red background (if needed)
+        Gb = "ch2 Percent"    # Green background (if needed)
+    ),
+    other.columns = list(
+        Flag = "Ignore Filter",  # Quality flag
+        ProbeName = "Name",      # Probe identifiers
+        Position = c("Array Row", "Array Column")  # Spatial information
+    ),
+    annotation = c("Row", "Column", "Name")  # Important meta columns
 )
-# Convert targets to tibble for easy joining
-agilent_data$targets
-agilent_data$targets <- agilent_data$targets |>
+
+#################
+pd7_2 = pd |>
+    filter(ID%in%c(paste0("GSM4723", 74:81)))
+pd7_2
+agilent_data2 <- read.maimages(
+    files = file.path(".temp", id, pd7_2$file),
+    source = "genepix",
+    green.only = FALSE,
+    names = pd7_2$ID)
+################
+
+#####Convert targets to tibble for easy joining
+agilent_data1$targets
+agilent_data1$targets <- agilent_data1$targets |>
     as_tibble(rownames = "sampleName") |>
     left_join(pd7, by = c("sampleName" = "ID")) |>
     as.data.frame() |>
     tibble::column_to_rownames("sampleName")
 
 #### gene Annotation
-gpl2 <- getGEO("GPL4133")
-annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_TYPE")]
-agilent_data$genes <- annot[match(agilent_data$genes$ProbeName, annot$SPOT_ID), ]
+
+gpl2 <- getGEO("GPL9686")
+dim(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
+
+dim(agilent_data1$genes)
+annot <- Table(gpl2)[, c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")] 
+dim(annot)
+annot |>
+    filter(GB_ACC=="AA705225")
+
+agilent_data1$genes <- annot[match(agilent_data1$genes$Name, annot$GB_ACC), ]
+dim(agilent_data1$genes)
 
 
 
@@ -108,105 +144,156 @@ eset <- ExpressionSet(
 )
 
 
-agilent_qc <- function(
-    agilent_data,
-    max_row_na = 0.1 * ncol(agilent_data$E), # Allow 10%
-    max_col_na = 0.1 * nrow(agilent_data$E)) {
-    # Calculate NA statistics
-    row_na_counts <- rowSums(is.na(agilent_data$E))
-    col_na_counts <- colSums(is.na(agilent_data$E))
-    # Print summary tables
-    message("\nMissing values per ROW (probe/gene):")
-    print(table(row_na_counts))
-    message("\nMissing values per COLUMN (sample):")
-    print(table(col_na_counts))
-    # Check for critical issues
-    problematic_rows <- sum(row_na_counts > max_row_na)
-    problematic_cols <- sum(col_na_counts > max_col_na)
-
-    if (problematic_rows > 0 || problematic_cols > 0) {
-        stop(
-            sprintf(
-                "\nSANITY CHECK FAILED:\n- %d probes/genes exceed %d missing values\n- %d samples exceed %d missing values\n",
-                problematic_rows, max_row_na,
-                problematic_cols, max_col_na
-            ),
-            call. = FALSE
-        )
-    } else {
-        message("\nSANITY CHECK PASSED: No excessive missing values detected")
+agilent_two_color_qc <- function(agilent_data,
+                                max_probe_na = 0.1,  # 10% threshold for probes
+                                max_sample_na = 0.1, # 10% threshold for samples
+                                intensity_cutoff_quantile = 0.2, # Intensity cutoff
+                                min_samples_above_cutoff = 0.2, # Minimum % samples
+                                verbose = TRUE) {
+    
+    # 1. Input Validation --------------------------------------------------------
+    required_components <- c("R", "G", "genes", "targets")
+    missing_comps <- setdiff(required_components, names(agilent_data))
+    if(length(missing_comps)) {
+        stop("Missing required components: ", paste(missing_comps, collapse=", "))
     }
-    # "3 tables"
-    # check if # of rows in pdata is same and cols in edata
-    # and rows of edata match rows of fdata
-    assert(dim(agilent_data$E)[2] == dim(agilent_data$targets)[1])
-    assert(dim(agilent_data$E)[1] == dim(agilent_data$genes)[1])
-    message("\nSANITY CHECK PASSED: All data match between rows and columns")
-    # Quality control
-    message("\nQC: background correction")
-    agilent_data_qc <- limma::backgroundCorrect(agilent_data, method = "normexp", offset = 20)
-    # agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
-    message("\nQC: normalize between arrays")
-    agilent_data_nor <- limma::normalizeBetweenArrays(agilent_data_qc, method = "quantile")
-    # remove those without a symbol
-    message("\nQC: removing those without a symbol")
-    agilent_data_rem <- agilent_data_nor[!is.na(agilent_data_nor$genes$ENSEMBL_ID) &
-        agilent_data_nor$genes$ENSEMBL_ID != "", ]
-    # todo: averaging or take one with best FC?
-    print(dim(agilent_data_rem))
-    message("\nQC: average for repetitives")
-    agilent_data_avg <- limma::avereps(agilent_data_rem, ID = agilent_data_rem$genes$ENSEMBL_ID)
-    print(dim(agilent_data_avg)) # 33492   202
-    message("\nQC: final dimensions")
-    # is it normalized?
-    message("\nIs it normalized:")
-    print(isLog2Transformed(agilent_data_avg$E))
-    # message("\nDensities plot ->:")
-    # show(plotDensities(agilent_data_avg, main = "", legend = FALSE))
-    message("\nRemoving low expressing genes across...")
-    # remove low expressing geneS
-    cutoff <- median(agilent_data_avg$E)
-    is_expressed <- agilent_data_avg$E > cutoff
-    keep <- rowSums(is_expressed) > 2
-    ## check how many genes are removed / retained.
-    ## subset to just those expressed genes
-    gse <- agilent_data_avg[keep, ]
+    
+    # 2. Data Type Conversion ---------------------------------------------------
+    if(verbose) message("\n=== DATA TYPE CONVERSION ===")
+    agilent_data$R <- apply(agilent_data$R, 2, as.numeric)
+    agilent_data$G <- apply(agilent_data$G, 2, as.numeric)
+    if("Rb" %in% names(agilent_data)) agilent_data$Rb <- apply(agilent_data$Rb, 2, as.numeric)
+    if("Gb" %in% names(agilent_data)) agilent_data$Gb <- apply(agilent_data$Gb, 2, as.numeric)
+    
+    # 3. Dimensional Consistency Checks ------------------------------------------
+    if(verbose) message("\n=== DIMENSIONAL CHECKS ===")
+    check_dims <- list(
+        list(nrow(agilent_data$R), "R rows", nrow(agilent_data$G), "G rows"),
+        list(ncol(agilent_data$R), "R cols", ncol(agilent_data$G), "G cols"),
+        list(nrow(agilent_data$R), "R rows", nrow(agilent_data$genes), "genes rows"),
+        list(ncol(agilent_data$R), "R cols", nrow(agilent_data$targets), "targets rows")
+    )
+    
+    for(chk in check_dims) {
+        if(chk[[1]] != chk[[3]]) {
+            stop(sprintf("Dimension mismatch: %s (%d) vs %s (%d)",
+                        chk[[2]], chk[[1]], chk[[4]], chk[[3]]))
+        }
+    }
+    if(verbose) message("✓ All dimensions consistent across R, G, genes, and targets")
+    
+    # 4. Missing Value Analysis ------------------------------------------------
+    if(verbose) message("\n=== MISSING VALUE ANALYSIS ===")
+    na_stats <- list(
+        R = list(
+            probes = rowMeans(is.na(agilent_data$R)),
+            samples = colMeans(is.na(agilent_data$R))
+        ),
+        G = list(
+            probes = rowMeans(is.na(agilent_data$G)),
+            samples = colMeans(is.na(agilent_data$G))
+        )
+    )
+    
+    combined_na <- list(
+        probes = pmax(na_stats$R$probes, na_stats$G$probes),
+        samples = pmax(na_stats$R$samples, na_stats$G$samples)
+    )
+    
+    flagged <- list(
+        probes = which(combined_na$probes > max_probe_na),
+        samples = which(combined_na$samples > max_sample_na)
+    )
+    
+    if(verbose) {
+        message("Red Channel (R/Cy5) Missing Values:")
+        print(summary(na_stats$R$probes * 100))
+        message("\nGreen Channel (G/Cy3) Missing Values:")
+        print(summary(na_stats$G$probes * 100))
+        message(sprintf("\nFlagged %d probes (%.1f%%) exceeding %.0f%% NA threshold",
+                      length(flagged$probes),
+                      length(flagged$probes)/nrow(agilent_data$R)*100,
+                      max_probe_na*100))
+        message(sprintf("Flagged %d samples (%.1f%%) exceeding %.0f%% NA threshold",
+                      length(flagged$samples),
+                      length(flagged$samples)/ncol(agilent_data$R)*100,
+                      max_sample_na*100))
+    }
+    
+    # 5. Quality Control Processing --------------------------------------------
+    if(verbose) message("\n=== QUALITY CONTROL PROCESSING ===")
+
+    # Filter probes without gene symbols
+    if(verbose) message("Filtering probes without gene annotations...")
+    has_gene <- !is.na(agilent_data$genes$GB_ACC) & agilent_data$genes$GB_ACC != ""
+    agilent_data <- agilent_data[has_gene, ]
+    
+    # Background correction
+    if(verbose) message("Performing background correction...")
+    agilent_data <- limma::backgroundCorrect(agilent_data, method = "normexp", offset = 1)
+    
+    # Within-array normalization (dye bias correction)
+    if(verbose) message("Performing within-array normalization...")
+    agilent_data <- limma::normalizeWithinArrays(agilent_data, method = "loess")
+    
+    # Between-array normalization
+    if(verbose) message("Performing between-array normalization...")
+    agilent_data <- limma::normalizeBetweenArrays(agilent_data, method = "quantile")
+    
+
+    
+    # Average replicate probes
+    if(verbose) message("Averaging replicate probes...")
+    agilent_data <- limma::avereps(agilent_data, ID = agilent_data$genes$GB_ACC)
+    
+    # 6. Low-Expression Filtering ---------------------------------------------
+    message("\n=== LOW-EXPRESSION FILTERING ===")
+    # For two-color arrays, filter based on BOTH channels
+    # Calculate average intensity (A-values) across arrays
+    avg_intensity <- rowMeans(agilent_data$A, na.rm=TRUE)  
+
+    # Set cutoff at 20th percentile of intensities
+    cutoff <- quantile(avg_intensity, probs=0.2)  
+    message("Intensity cutoff (20th percentile): ", round(cutoff, 2))
+
+    # Keep genes above cutoff in at least 20% of samples
+    keep <- rowSums(agilent_data$A > cutoff) >= ncol(agilent_data$A)*0.2
+
+    # Apply filtering
+    gse <- agilent_data[keep, ]
     gse$genes <- droplevels(gse$genes)
-    # QC Checks
-    message("\nRunning quality checks...")
-    print(paste("Original probes:", nrow(agilent_data$E)))
-    print(paste("After filtering:", nrow(agilent_data_rem$E)))
-    print(paste("After averaging:", nrow(agilent_data_avg$E)))
-    print(paste("After removing low expressing genes:", nrow(gse$E)))
+
+    message("\nFiltering results:")
+    message("- Genes before filtering: ", nrow(agilent_data))
+    message("- Genes after filtering: ", nrow(gse))
+    message("- Percentage retained: ", round(nrow(gse)/nrow(agilent_data)*100, 1), "%")
+
     return(gse)
 }
 
+gse = agilent_two_color_qc(agilent_data1)
 
-gse_final <- agilent_qc(agilent_data)
 
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
 pd7
-design <- model.matrix(~ 0 + factor(pd7$ATLaa))
-rownames(design) <- pd7$ATLaa
-colnames(design) <- levels(factor(pd7$ATLaa))
+design <- model.matrix(~ 0 + factor(pd7$atl_subtype2))
+rownames(design) <- pd7$ID
+colnames(design) <- levels(factor(pd7$atl_subtype2))
 head(design, 20)
-
+gse
 # Make contrasts (adjust based on your comparisons)
-levels(factor(pd7$ATLaa))
+levels(factor(pd7$atl_subtype2))
 contrast.matrix <- makeContrasts(
-    youngATL_oldATL = youngATL - oldATL,
-    youngATL_youngATLc = youngATL - youngATLc,
-    youngATLc_oldATLc = youngATLc - oldATLc,
-    oldATL_oldATLc = oldATL - oldATLc,
+    ATL_AC = ATL - AC,
     levels = design
 )
-fit2 <- lmFit(gse_final, design) %>%
+fit2 <- lmFit(gse, design) %>%
     contrasts.fit(contrast.matrix) %>%
     eBayes()
 
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf, adjust.method = "BH", p.value=.05) #, sort.by = "B", p.value = 0.05)
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH") #, sort.by = "B", p.value = 0.05)
 
 top_probes
 
@@ -215,7 +302,7 @@ topprobes <- top_probes |>
     tibble::rownames_to_column("probeid") 
     
 topprobes |>
-    arrange(adj.P.Val, desc(youngATL_oldATL)) |>
+    arrange(adj.P.Val) |>
     head(50)
 
 topprobes |>
