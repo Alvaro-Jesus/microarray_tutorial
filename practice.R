@@ -231,15 +231,15 @@ top_probes |>
     select(-c(1:5, 7)) |>
     as_tibble() |>
     arrange((ATL_AC)) |>
-    dplyr::filter(GENE_SYMBOL%in%IF) |>
+    dplyr::filter(GENE_SYMBOL=="CD83") # |>
     dplyr::filter(ATL_AC > ATL_HAMTSP, HAM_TSP_AC>0, adj.P.Val < 0.01) 
 datatable(IF)
 
 cd4_genes <- c("CD4", "CD3D", "CD3E", "CD3G", "FOXP3", "TBX21", "GATA3", "RORC", 
                "IFNG", "IL4", "IL17A", "IL10", "CTLA4", "PDCD1")
 library(DT)
-IF = annot |>
-    dplyr::filter(str_detect(GENE_NAME, "Interferon")) |>
+annot |>
+    dplyr::filter(str_detect(GENE_NAME, "Bcl1")) #|>
     pull(SYMBOL)
 IF
 topprobes <- top_probes |>
