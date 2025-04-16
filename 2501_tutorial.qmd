@@ -10,6 +10,51 @@ eval: false
 
 Data repository from NCBI with functional genomic data.
 
+For Microarrays: ‘ink-jet printed’ onto slides (Agilent) or synthesised in situ (Affymetrix).
+
+Two-colors: two biological samples (experimental/test sample and control/reference sample) are labelled with different fluorescent dyes, usually Cyanine 3 (Cy3) and Cyanine 5 (Cy5). Equal amounts of labelled cDNA are then simultaneously hybridised to the same microarray chip. After this competitive hybridisation, the fluorescence measurements are made separately for each dye and represent the abundance of each gene in one sample (test sample, Cy5) relative to the other one (control sample, Cy3).
+
+Limitations: Previous genome knowledge, cross-hybridisation, limited dynamic range of detection owing to both background and saturation signals, complicated normalisation methods. (dye bias effect).
+
+![https://www.ebi.ac.uk/training/online/courses/functional-genomics-ii-common-technologies-and-data-analysis-methods/microarrays/](images/paste-2.png)
+
+Design: dye swap design or a reference design (Reference design is the most common).
+
+**Also necessary to include Technical** replicates and **biological** replicates
+
+![](images/paste-3.png)
+
+Usual pipeline:
+
+![](images/paste-4.png)
+
+## A. Feature extraction
+
+![](images/paste-5.png)
+
+|                   |                                      |                    |
+|:------------------|:-------------------------------------|:-------------------|
+| Affymetrix        | .CEL                                 | affy, limma, oligo |
+| Agilent           | feature extraction file (txt or tsv) | limma              |
+| GenePix (scanner) | .gpr (tsv)                           |                    |
+| Illumina          | .idat (binary)                       | illuminaio         |
+| txt (tsv)         | lumi                                 |                    |
+| Nimblegen         | NimbleScan, .pair (tsv)              |                    |
+
+## B Quality Control
+
+![](images/paste-6.png)
+
+## C Normalisation
+
+For Expression Atlas, Affymetrix microarray data is normalised using the ‘Robust Multi-Array Average’ (RMA) method within the ‘oligo’ R package.
+
+Agilent microarray data is normalised using the ‘limma’ package: ‘quantile normalisation’ for one-colour microarray data.
+
+## D Differential expression analysis
+
+The ‘limma’ package that is used to identify differentially expressed genes incorporates a method to correct for multiple testing. This method creates a log2 fold change ratio between the test and control condition and an ‘adjusted’ p-value that rates the significance of the difference.
+
 ## 1. Definitions
 
 -   Platform: an array or sequencer.

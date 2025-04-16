@@ -2,19 +2,21 @@
 pacman::p_load(
     GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots, affy, oligoClasses, testit
 )
-# function
+# function to determine if it is log2 transformed
 isLog2Transformed <- function(data) {
     qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm = T))
     shouldBeLogged <- (qx[5] > 100) || (qx[6] - qx[1] > 50 && qx[2] > 0)
     return(!shouldBeLogged)
 }
 
+```
 
+
+```{r}
 # First obtain metadata
 id <- "GSE19080"
 
-
-# creating a temp folder
+# Creating a temp folder
 if (!dir.exists(paste0(".temp/", id))) {
     dir.create(paste0(".temp/", id))
 } else {
@@ -24,14 +26,15 @@ if (!dir.exists(paste0(".temp/", id))) {
 # Obtaining Metadata
 meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
 meta <- meta[[1]]
+
+# Exploring a bit, # platform GPL4133
 fData(meta)
 varLabels(meta)
 head(pData(meta))
 colnames(exprs(meta))
 dim(meta)
 
-# GPL4133
-pd
+# Data wrangling
 pd <- pData(meta) |>
     tibble::rownames_to_column("ID") |>
     dplyr::select("characteristics_ch1", "characteristics_ch1.3", ID, supplementary_file) |>
@@ -48,13 +51,13 @@ pd <- pData(meta) |>
         str_detect(atl_subtype, "Healthy") ~ "HD",
         .default=NA))
       
-
-table(pd7$atl_subtype2)
+table(pd$atl_subtype2)
 
 ## A loop to download all the files in the .temp of this environment
-for (i in 1:length(pd7$supplementary_file)) {
-    url <- pd7$supplementary_file[i]
-    destfile <- file.path(paste0(".temp/", id, "/", pd7$file[i]))
+
+for (i in 1:length(pd$supplementary_file)) {
+    url <- pd$supplementary_file[i]
+    destfile <- file.path(paste0(".temp/", id, "/", pd$file[i]))
     # Download the file
     tryCatch(
         {
@@ -70,38 +73,56 @@ for (i in 1:length(pd7$supplementary_file)) {
         untar(destfile, exdir = paste0(".temp/", id))
     }
 }
+```
 
-# exploring one file
+```{r}
+######## Subsetting 
 
-con <- gzfile(file.path("/Users/denriquez/Documents/GitHub/microarray_tutorial/.temp/GSE19080/GSM472372_HISH0553.txt.gz"))
+### exploring one file
+con <- gzfile(file.path(".temp/GSE19080/GSM472372_HISH0553.txt.gz"))
 file_lines <- readLines(con, n=50)
 close(con)
 file_lines
 
-### Re-read the raw files
+### Re-read the raw files, but subsetting agilent files
+
 pd7 = pd |>
     filter(ID%in%c(paste0("GSM4723", c(56:73, 82:93))))
-pd7
+
 agilent_data1 <- read.maimages(
     files = file.path(".temp", id, pd7$file),
     source = "agilent",
     green.only = FALSE,
     names = pd7$ID,
+    sep = "\t",
     columns = list(
-        R = "ch1 Ratio",      # Red channel (Cy5)
-        G = "ch2 Ratio",      # Green channel (Cy3)
-        Rb = "ch1 Percent",   # Red background (if needed)
-        Gb = "ch2 Percent"    # Green background (if needed)
+        R = "ch1 Ratio",          # Note the period instead of space
+        G = "ch2 Ratio",
+        Rb = "ch1 Percent",
+        Gb = "ch2 Percent"
     ),
-    other.columns = list(
-        Flag = "Ignore Filter",  # Quality flag
-        ProbeName = "Name",      # Probe identifiers
-        Position = c("Array Row", "Array Column")  # Spatial information
+    annotation = c(
+        ProbeID = "Name",
+        Flag = "Ignore Filter"     # With period instead of space
     ),
-    annotation = c("Row", "Column", "Name")  # Important meta columns
+    other.columns = c(
+        "Number",
+        "Array Row",              # Spatial coordinates
+        "Array Column",
+        "Row",                    # Alternate indices
+        "Column",
+        R.sd = "ch1 Intensity Std Dev",  # Red intensity standard deviation
+        G.sd = "ch2 Intensity Std Dev"   # Green intensity standard deviation
+    ),
+    as.is = FALSE
 )
 
+
+
+
+
 #################
+
 pd7_2 = pd |>
     filter(ID%in%c(paste0("GSM4723", 74:81)))
 pd7_2
@@ -110,33 +131,42 @@ agilent_data2 <- read.maimages(
     source = "genepix",
     green.only = FALSE,
     names = pd7_2$ID)
-
 ################
 
 #####Convert targets to tibble for easy joining
-agilent_data1$targets
 agilent_data1$targets <- agilent_data1$targets |>
     as_tibble(rownames = "sampleName") |>
     left_join(pd7, by = c("sampleName" = "ID")) |>
     as.data.frame() |>
     tibble::column_to_rownames("sampleName")
 
+
 #### gene Annotation
-
 gpl2 <- getGEO("GPL9686")
-dim(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
-
-dim(agilent_data1$genes)
+fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")]
 annot <- Table(gpl2)[, c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")] 
-dim(annot)
-annot |>
-    filter(GB_ACC=="Arabidopsis")
 
-agilent_data1$genes <- annot[match(agilent_data1$genes$Name, annot$GB_ACC), ]
-colnames(agilent_data1$genes)
+agilent_data1$genes = agilent_data1$genes |>
+    as_tibble(rownames = "name") |>
+    left_join(annot, by = c("Name" = "GB_ACC")) |>
+    dplyr::rename("IgnoreFilter"="Ignore Filter") |>
+    as.data.frame() |>
+    tibble::column_to_rownames("name")
 
+head(agilent_data1$genes)
 
-agilent_data1$genes
+# 1. Identify control probes (SSC, Arabidopsis, etc.)
+is_control <- grepl("^SSC|^Arabidopsis", agilent_data1$genes$Name, ignore.case = TRUE)
+is_control
+# 2. Apply filtering logic: Keep controls OR non-controls with Ignore Filter == 0
+keep <- is_control | (agilent_data1$genes$IgnoreFilter != 1)
+table(keep)
+keep
+# 3. Subset the data
+agilent_data1 <- agilent_data1[keep, ]
+agilent_data1$genes <- droplevels(agilent_data1$genes)
+dim(agilent_data1)
+tail(agilent_data1$genes, 100)
 
 # For single-channel EList (it is not obligatory)
 eset <- ExpressionSet(
@@ -144,6 +174,9 @@ eset <- ExpressionSet(
     phenoData = AnnotatedDataFrame(agilent_data$targets),
     featureData = AnnotatedDataFrame(agilent_data$genes)
 )
+head(agilent_data1)
+agilent_data=agilent_data1
+
 
 
 agilent_two_color_qc <- function(agilent_data,
@@ -152,86 +185,23 @@ agilent_two_color_qc <- function(agilent_data,
                                 max_sample_na = 0.1,
                                 intensity_cutoff_quantile = 0.2,
                                 min_samples_above_cutoff = 0.2,
-                                verbose = TRUE) {
+                                verbose = TRUE){
+    # Timer
+    start_time = proc.time()
+
     # 1. Input Validation --------------------------------------------------------
     required_components <- c("R", "G", "genes", "targets")
     missing_comps <- setdiff(required_components, names(agilent_data))
     if(length(missing_comps)) {
-        stop("Missing required components: ", paste(missing_comps, collapse=", "))
+        stop("Missing required components: ", paste(missing_comps, collapse=", "),
+        "\nObject structure:\n", paste(capture.output(str(agilent_data)), collapse="\n"))
     }
-    
-    # 2. Initial Probe Validation -----------------------------------------------
-    if(verbose) message("\n=== INITIAL PROBE VALIDATION ===")
-    
-    # 2. A - Calculate valid probes (non-NA in both channels)
-    is_valid <- !is.na(agilent_data$R) & !is.na(agilent_data$G)
-    valid_prop <- rowMeans(is_valid)
-    
-    # 2. B - Identify probes to keep
-    keep_probes <- valid_prop >= min_valid_probes
-    
-    if(verbose) {
-        message("Probe validity summary:")
-        message("- Total probes: ", length(keep_probes))
-        message("- Valid probes (≥", min_valid_probes*100, "% good values): ", sum(keep_probes))
-        message("- Invalid probes removed: ", sum(!keep_probes))
-        
-        # Show distribution of valid values per probe
-        print(quantile(valid_prop, probs = seq(0, 1, 0.1)))
+    # Check for empty data
+    if(nrow(agilent_data$R) == 0 || ncol(agilent_data$R) == 0) {
+        stop("Input data appears to be empty (zero rows or columns)")
     }
 
-    # 2. C - Filter all components
-    agilent_data <- agilent_data[keep_probes, ]
-    agilent_data$genes <- agilent_data$genes[keep_probes, ]
-
-    # 3. Robust Data Conversion ---------------------------------------------------
-    clean_channel <- function(x, channel_name) {
-        # Convert to matrix if needed
-        if(!is.matrix(x)) x <- as.matrix(x)
-        
-        # Identify non-numeric values
-        problematic <- !matrix(as.numeric(grepl("^[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?$", x)), 
-                             nrow=nrow(x), ncol=ncol(x))
-        
-        if(any(problematic)) {
-            if(verbose) {
-                message("Found ", sum(problematic), " non-numeric values in ", channel_name)
-                message("Sample problematic values: ", 
-                       paste(unique(as.vector(x)[problematic][1:5]), collapse=", "), "...")
-            }
-            
-            # Convert to numeric, forcing NAs for non-convertible values
-            x <- matrix(as.numeric(x), nrow=nrow(x), ncol=ncol(x))
-            
-            # Replace NAs with channel median
-            x[is.na(x)] <- median(x, na.rm=TRUE)
-        } else {
-            storage.mode(x) <- "numeric"
-        }
-        x
-    }
-    
-    agilent_data$R <- clean_channel(agilent_data$R, "Red channel")
-    agilent_data$G <- clean_channel(agilent_data$G, "Green channel")
-    
-    # Handle background channels if they exist
-    if("Rb" %in% names(agilent_data)) {
-        agilent_data$Rb <- clean_channel(agilent_data$Rb, "Red background")
-    }
-    if("Gb" %in% names(agilent_data)) {
-        agilent_data$Gb <- clean_channel(agilent_data$Gb, "Green background")
-    }
-    
-    # 3. Control Probe Handling -------------------------------------------------
-    if(verbose) message("\nIdentifying control probes...")
-    control_types <- c("^SSC", "^Arabidopsis")
-    is_control <- Reduce(`|`, lapply(control_types, function(p) grepl(p, agilent_data$genes$Name)))
-    
-    if(verbose) {
-        message("Control probe summary:")
-        print(table(gsub("_.*", "", agilent_data$genes$Name[is_control])))
-    }
-    
+         
     # 4. Dimensional Checks ----------------------------------------------------
     if(verbose) message("\nVerifying dimensions...")
     dim_checks <- list(
@@ -245,117 +215,31 @@ agilent_two_color_qc <- function(agilent_data,
         if(chk[[1]] != chk[[2]]) stop(chk[[3]])
     }
     
-    # 5. Missing Value Analysis ------------------------------------------------
-    if(verbose) message("\nAnalyzing missing values...")
-    na_stats <- list(
-        R = list(
-            probes = rowMeans(is.na(agilent_data$R)),
-            samples = colMeans(is.na(agilent_data$R))
-        ),
-        G = list(
-            probes = rowMeans(is.na(agilent_data$G)),
-            samples = colMeans(is.na(agilent_data$G))
-        )
-    )
-    
-    # Identify completely failed probes/samples
-    complete_failures <- list(
-        probes = which(rowSums(is.na(agilent_data$R)) == ncol(agilent_data$R) | 
-                       rowSums(is.na(agilent_data$G)) == ncol(agilent_data$G)),
-        samples = which(colSums(is.na(agilent_data$R)) == nrow(agilent_data$R) &
-                       colSums(is.na(agilent_data$G)) == nrow(agilent_data$G))
-    )
-    
-    # 6. Data Cleaning ---------------------------------------------------------
-    if(length(complete_failures$probes) > 0) {
-        if(verbose) message("\nRemoving ", length(complete_failures$probes), " completely failed probes")
-        agilent_data <- agilent_data[-complete_failures$probes, ]
-    }
-    
+
     # 7. Quality Control Processing --------------------------------------------
     if(verbose) message("\nRunning QC pipeline...")
     
     # Background correction
-    agilent_data <- limma::backgroundCorrect(agilent_data, method="normexp", offset=1)
+    agilent_data <- limma::backgroundCorrect(agilent_data, method="normexp", offset=16)
     
     # Normalization
     agilent_data <- limma::normalizeWithinArrays(agilent_data, method="loess")
     agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
     
-    # 2. Calculate NA proportions safely
-    calculate_na_proportion <- function(x) {
-        if(ncol(x) == 1) {
-            as.numeric(is.na(x))
-        } else {
-            rowSums(is.na(x)) / ncol(x)
-        }
-    }
     
-    na_proportion_R <- calculate_na_proportion(agilent_data$R)
-    na_proportion_G <- calculate_na_proportion(agilent_data$G)
-    
-    # 3. Create filter mask
-    keep <- !is_control & 
-            (na_proportion_R <= max_probe_na) & 
-            (na_proportion_G <= max_probe_na)
-    
-    # 4. Apply filtering
-    agilent_data <- list(
-        R = agilent_data$R[keep, , drop = FALSE],
-        G = agilent_data$G[keep, , drop = FALSE],
-        genes = agilent_data$genes[keep, ],
-        targets = agilent_data$targets
-    )
-
-    # Filter low expression
-    A_values <- (agilent_data$R + agilent_data$G)/2
-    if(!is.matrix(A_values)) A_values <- as.matrix(A_values)
-    
-    cutoff <- quantile(A_values, intensity_cutoff_quantile, na.rm=TRUE)
-    min_samples <- max(1, ceiling(ncol(A_values) * min_samples_above_cutoff))
-    keep_expr <- rowSums(A_values > cutoff, na.rm=TRUE) >= min_samples
-    
-    filtered_data <- agilent_data[keep_expr, ]
-    filtered_data$genes <- droplevels(filtered_data$genes)
-    
+  
     # 8. Return Results --------------------------------------------------------
-    structure(
-        list(
-            data = filtered_data,
-            qc_metrics = list(
-                initial_probes = nrow(agilent_data$R) + length(complete_failures$probes),
-                final_probes = nrow(filtered_data$R),
-                controls_removed = sum(is_control),
-                na_probes_removed = sum(!keep),
-                low_expr_removed = sum(keep) - sum(keep_expr),
-                intensity_cutoff = cutoff,
-                min_samples = min_samples,
-                missing_values = na_stats
-            )
-        ),
-        class = "agilent_qc_results"
-    )
+    end_time <- proc.time()
+    
+    
+    return(agilent_data)
 }
 
-# Enhanced print method
-print.agilent_qc_results <- function(x, ...) {
-    cat("Agilent Two-Color QC Results\n")
-    cat("----------------------------\n")
-    cat("Final dimensions:", x$qc_metrics$final_probes, "genes ×", 
-       ncol(x$data$R), "samples\n\n")
-    cat("Filtering metrics:\n")
-    cat("- Controls removed:", x$qc_metrics$controls_removed, "\n")
-    cat("- High NA probes removed:", x$qc_metrics$na_probes_removed, "\n")
-    cat("- Low expression removed:", x$qc_metrics$low_expr_removed, "\n")
-    cat("- Final intensity cutoff:", round(x$qc_metrics$intensity_cutoff, 2), "\n")
-    cat("- Required samples above cutoff:", x$qc_metrics$min_samples, "\n")
-    invisible(x)
-}
+
 
 gse = agilent_two_color_qc(agilent_data1)
 print.agilent_qc_results(gse)
-
-
+head(gse)
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
 pd7
@@ -363,7 +247,7 @@ design <- model.matrix(~ 0 + factor(pd7$atl_subtype2))
 rownames(design) <- pd7$ID
 colnames(design) <- levels(factor(pd7$atl_subtype2))
 head(design, 20)
-gse
+dim(gse)
 # Make contrasts (adjust based on your comparisons)
 levels(factor(pd7$atl_subtype2))
 contrast.matrix <- makeContrasts(
@@ -375,7 +259,8 @@ fit2 <- lmFit(gse, design) %>%
     eBayes()
 
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf, adjust.method = "BH") #, sort.by = "B", p.value = 0.05)
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH", sort.by = "B")#, p.value = 0.5)
+
 
 top_probes
 
