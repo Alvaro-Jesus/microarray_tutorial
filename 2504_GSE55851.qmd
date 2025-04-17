@@ -21,8 +21,8 @@ isLog2Transformed <- function(data){
 
 ```{r}
 # First obtain metadata
-GSE55851_meta = getGEO("GSE55851", GSEMatrix=TRUE, destdir=".temp" ) 
-GSE55851_meta=GSE55851_meta[[1]]
+GSE55851_meta <- getGEO("GSE55851", GSEMatrix = TRUE, destdir = ".temp")
+GSE55851_meta <- GSE55851_meta[[1]]
 
 # Explore columns
 class(GSE55851_meta)
@@ -31,72 +31,106 @@ head(pData(GSE55851_meta))
 
 # Data wrangling
 pd <- pData(GSE55851_meta) |>
-  tibble::rownames_to_column("ID") |>
-  dplyr::select("gender:ch1", "atl subtype:ch1", "age:ch1", ID, supplementary_file) |>
-  dplyr::mutate(file = str_split(supplementary_file, "/") |> map_chr(tail, 1)) |>
-  dplyr::rename(gender="gender:ch1", atl_sub="atl subtype:ch1", age= "age:ch1") |>
-  mutate(atltype = dplyr::recode_factor(atl_sub, 
-    "ATL-acute"="ATLa",
-    "ATL-chronic"="ATLc",
-    "ATL-smoldering"="ATLc",
-    "HTLV-1 asymptomatic carrier"="AC",
-    "Normal"="HD"
-  ), cd7=case_when(
-      str_detect(file, "-D.") ~ "C7D", 
-      str_detect(file, "-P") ~"CD7P",
-      str_detect(file, "N") ~"CD7N",
-      .default="U"))
+    tibble::rownames_to_column("ID") |>
+    dplyr::select("gender:ch1", "atl subtype:ch1", "age:ch1", ID, supplementary_file) |>
+    dplyr::mutate(file = str_split(supplementary_file, "/") |> map_chr(tail, 1)) |>
+    dplyr::rename(gender = "gender:ch1", atl_sub = "atl subtype:ch1", age = "age:ch1") |>
+    mutate(atltype = dplyr::recode_factor(atl_sub,
+        "ATL-acute" = "ATLa",
+        "ATL-chronic" = "ATLc",
+        "ATL-smoldering" = "ATLc",
+        "HTLV-1 asymptomatic carrier" = "AC",
+        "Normal" = "HD"
+    ), cd7 = case_when(
+        str_detect(file, "-D.") ~ "C7D",
+        str_detect(file, "-P") ~ "CD7P",
+        str_detect(file, "N") ~ "CD7N",
+        .default = "U"
+    ))
 
 ### for CD7+CADM1+ (infected CD4 is homogenous) across all subtypes
 ### for CD7+CADM1- non-infected CD4 is homogeneous across all subtypes
 ### for CD7-CADM1+ (neoplastic cells) are homogeneous across all subtypes
 ## Exlude HD to evaluate DE genes in CD7+CADM1- vs CD7+CADM1+
 
-pd7 = pd |>
-    dplyr::filter(atltype!="HD", cd7=="CD7N")
+pd7 <- pd |>
+    dplyr::filter(atltype != "HD", cd7 == "CD7N")
+pd7 <- pd
+
+pd7
+
+id <- "GSE55851" # GPL4133
+
+# creating a temp folder
+if (!dir.exists(paste0(".temp/", id))) {
+    dir.create(paste0(".temp/", id))
+} else {
+    message("Folder already exists!")
+}
+
+## Download all the files in the .temp of this environment
+for (i in 1:length(pd7$supplementary_file)) {
+    url <- pd7$supplementary_file[i]
+    destfile <- file.path(paste0(".temp/", id, "/", pd7$file[i]))
+    # Download the file
+    tryCatch(
+        {
+            download.file(url, destfile, mode = "wb", method = "curl")
+        },
+        error = function(e) {
+            # Fallback to default method if curl fails
+            download.file(url, destfile, mode = "wb")
+        }
+    )
+    # Optional: Extract if it's a tar file
+    if (grepl("\\.tar(\\.gz)?$", destfile)) {
+        untar(destfile, exdir = paste0(".temp/", id))
+    }
+}
+
 
 ### Re-read the raw files
 agilent_data <- read.maimages(
-  files = paste0(".temp/GSE55851/", pd7$file),
-  source = "agilent",
-  green.only = TRUE,
-  names = pd7$ID,
-  columns = list(
-    E = "gMedianSignal",       # Foreground signal
-    Eb = "gBGMedianSignal"     # Background signal
-  ),
-  other.columns = "gIsWellAboveBG"  # Quality flag (if column exists)
+    files = paste0(".temp/GSE55851/", pd7$file),
+    source = "agilent",
+    green.only = TRUE,
+    names = pd7$ID,
+    columns = list(
+        E = "gMedianSignal", # Foreground signal
+        Eb = "gBGMedianSignal" # Background signal
+    ),
+    other.columns = "gIsWellAboveBG" # Quality flag (if column exists)
 )
-
+head(agilent_data)
 # Convert targets to tibble for easy joining
-agilent_data$targets = agilent_data$targets |>
-as_tibble(rownames = "sampleName") |>
-  left_join(pd, by = c("sampleName"="ID")) |>
-  as.data.frame() |>
-  tibble::column_to_rownames("sampleName")
+agilent_data$targets <- agilent_data$targets |>
+    as_tibble(rownames = "sampleName") |>
+    left_join(pd, by = c("sampleName" = "ID")) |>
+    as.data.frame() |>
+    tibble::column_to_rownames("sampleName")
 
 
 #### gene Annotation
-gpl2 = getGEO("GPL10332")
+gpl2 <- getGEO("GPL10332")
 annot <- Table(gpl2)[, c("ID", "GENE_SYMBOL", "ENSEMBL_ID", "SPOT_ID", "CONTROL_TYPE")]
 agilent_data$genes <- annot[match(agilent_data$genes$ProbeName, annot$SPOT_ID), ]
-
-
+dim(agilent_data)
+table(agilent_data$genes$CONTROL_TYPE)
 ```
 
 
 ```{r}
-
 # For single-channel EList (it is not obligatory)
-eset <- ExpressionSet(assayData = agilent_data$E,
-                     phenoData = AnnotatedDataFrame(agilent_data$targets),
-                     featureData = AnnotatedDataFrame(agilent_data$genes))
+eset <- ExpressionSet(
+    assayData = agilent_data$E,
+    phenoData = AnnotatedDataFrame(agilent_data$targets),
+    featureData = AnnotatedDataFrame(agilent_data$genes)
+)
 
-agilent_qc = function(
-  agilent_data,
-  max_row_na = 0.1 * ncol(agilent_data$E),  # Allow 10% 
-  max_col_na = 0.1 * nrow(agilent_data$E)
-  ){
+agilent_qc <- function(
+    agilent_data,
+    max_row_na = 0.1 * ncol(agilent_data$E), # Allow 10%
+    max_col_na = 0.1 * nrow(agilent_data$E)) {
     # Calculate NA statistics
     row_na_counts <- rowSums(is.na(agilent_data$E))
     col_na_counts <- colSums(is.na(agilent_data$E))
@@ -108,35 +142,39 @@ agilent_qc = function(
     # Check for critical issues
     problematic_rows <- sum(row_na_counts > max_row_na)
     problematic_cols <- sum(col_na_counts > max_col_na)
-    
-    if (problematic_rows > 0 || problematic_cols > 0){
-    stop(
-      sprintf(
-        "\nSANITY CHECK FAILED:\n- %d probes/genes exceed %d missing values\n- %d samples exceed %d missing values\n",
-        problematic_rows, max_row_na,
-        problematic_cols, max_col_na
-        ),
-        call. = FALSE)} 
-    else {
-    message("\nSANITY CHECK PASSED: No excessive missing values detected")}
+
+    if (problematic_rows > 0 || problematic_cols > 0) {
+        stop(
+            sprintf(
+                "\nSANITY CHECK FAILED:\n- %d probes/genes exceed %d missing values\n- %d samples exceed %d missing values\n",
+                problematic_rows, max_row_na,
+                problematic_cols, max_col_na
+            ),
+            call. = FALSE
+        )
+    } else {
+        message("\nSANITY CHECK PASSED: No excessive missing values detected")
+    }
     # "3 tables"
     # check if # of rows in pdata is same and cols in edata
     # and rows of edata match rows of fdata
-    assert(dim(agilent_data$E)[2]==dim(agilent_data$targets)[1])
-    assert(dim(agilent_data$E)[1]==dim(agilent_data$genes)[1])
+    assert(dim(agilent_data$E)[2] == dim(agilent_data$targets)[1])
+    assert(dim(agilent_data$E)[1] == dim(agilent_data$genes)[1])
     message("\nSANITY CHECK PASSED: All data match between rows and columns")
     # Quality control
     message("\nQC: background correction")
-    agilent_data_qc  <- limma::backgroundCorrect(agilent_data , method="normexp", offset=20) 
-    #agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
+    agilent_data_qc <- limma::backgroundCorrect(agilent_data, method = "normexp", offset = 20)
+    # agilent_data = normalizeWithinArrays(agilent_data ,method="loess") we only have one color
     message("\nQC: normalize between arrays")
-    agilent_data_nor <- limma::normalizeBetweenArrays(agilent_data_qc, method="quantile")
+    agilent_data_nor <- limma::normalizeBetweenArrays(agilent_data_qc, method = "quantile")
     # remove those without a symbol
     message("\nQC: removing those without a symbol")
-    agilent_data_rem <- agilent_data_nor[!(agilent_data_nor$genes$ENSEMBL_ID==""), ] #considering "" as empty
+    agilent_data_rem <- agilent_data_nor[(agilent_data_nor$genes$CONTROL_TYPE == "FALSE"), ] # considering "" as empty
     # todo: averaging or take one with best FC?
     message("\nQC: average for repetitives")
-    agilent_data_avg <- avereps(agilent_data_rem, ID=agilent_data_rem$genes$ENSEMBL_ID) #Probe name from annotations
+    agilent_data_avg <- avereps(agilent_data_rem, ID = agilent_data_rem$genes$SPOT_ID) # Probe name from annotations
+    message("\nQC: average for repetitives")
+    agilent_data_avg <- avereps(agilent_data_avg, ID = agilent_data_avg$genes$GENE_SYMBOL) 
     message("\nQC: final dimensions")
     print(dim(agilent_data_avg)) # 33492   202
     # is it normalized?
@@ -145,93 +183,145 @@ agilent_qc = function(
     message("\nDensities plot ->:")
     plotDensities(agilent_data_avg, main = "", legend = FALSE)
     return(agilent_data_avg)
-    }
+}
 
+gse <- agilent_qc(agilent_data)
+
+gse
 # First perform differential expression analysis to find significant probes
 # Create design matrix based on final_subtype
 pd7
-design <- model.matrix(~0 + factor(pd7$atl_subtype2))
-design 
-rownames(design) = pd7$ID
-colnames(design) <- levels(factor(pd7$atl_subtype2))
+design <- model.matrix(~ 0 + factor(pd7$cd7))
+design
+rownames(design) <- pd7$ID
+colnames(design) <- levels(factor(pd7$cd7))
 head(design, 20)
 
 # remove low expressing geneS
-cutoff <- median(agilent_data_avg$E)
+cutoff <- median(gse$E)
 cutoff
 ## TRUE or FALSE for whether each gene is "expressed" in each sample
-is_expressed <- agilent_data_avg$E > cutoff
+is_expressed <- gse$E > cutoff / 2
 ## Identify genes expressed in more than 2 samples
 keep <- rowSums(is_expressed) > 2
 ## check how many genes are removed / retained.
 table(keep)
 ## subset to just those expressed genes
-gse <- agilent_data_avg$E[keep,]
-
+gse1 <- gse[keep, , drop = FALSE]
+# For phenotype data factors
+dim(gse1)
+dim(gse)
 # Fit linear model
 fit <- lmFit(gse, design)
 # Make contrasts (adjust based on your comparisons)
-levels(factor(pd7$atl_subtype2))
+levels(factor(pd7$cd7))
+
 contrast.matrix <- makeContrasts(
-  ATLa_ATLc= ATLa - ATLc,
-  ATLa_HD= ATLa - HD,
-  ATLc_HD= ATLc - HD,
-  levels = design
+    CD7N_CD7P = CD7N - CD7P,
+    CD7N_CD7D = CD7N - C7D,
+    CD7D_CD7P = C7D - CD7P,
+    levels = design
 )
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 fit2
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf,  adjust.method = "BH", sort.by = "B", p.value = 0.01)
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH", sort.by = "B") # , p.value = 0.01)
 colnames(top_probes)
+top_probes |>
+  dplyr::filter(grepl("ADORA3", GENE_SYMBOL))
+(top_probes$GENE_SYMBOL, "NT5E")
+library(tidyverse)
+library(stringr)
+
+annot |>
+    dplyr::filter(stringr::str_detec(GENE_SYMBOL, "ENTPD1"))
+
+
+#################
+ligenes = c("ADORA1", "ADORA2A", "ADORA2B", "ADORA3", "ENTPD1", "NT5E")
+logexp = gse$E[ligenes,] 
+
+metas = gse$targets[,c("file", "cd7")] |>
+  tibble::rownames_to_column("Patient")
+
+logexp = logexp |>
+  as.data.frame() |>
+  tibble::rownames_to_column("ID") |>
+  pivot_longer(-ID, names_to="Patient", values_to="log") |>
+  left_join(metas, by="Patient" )
+
+
+logexp |>
+  tidyplots::tidyplot(x=cd7, y=log, color=cd7) |>
+  tidyplots::add_boxplot() |>
+  tidyplots::add_data_points_jitter(alpha=.5) |>
+  tidyplots::adjust_y_axis_title("Log2Expression") |>
+   tidyplots::rename_x_axis_labels(new_names = c("C7D"="CD7+\nCADM1+", "CD7P"="CD7+\nCADM1-", "CD7N"="CD7-\nCADM1+")) |>
+  tidyplots::adjust_x_axis_title("") |>
+  tidyplots::remove_legend() |>
+  tidyplots::remove_caption() |>
+  tidyplots::add_test_asterisks() |>
+  tidyplots::adjust_font(face="bold", fontsize = 5) |>
+  tidyplots::adjust_title(face="bold") |>
+  tidyplots::split_plot(by="ID") |>
+  tidyplots::save_plot("Li_cd7.png", bg="transparent")
+gse$targets
+CD7 = gse$targets$cd7,
+ID = gse$targets$ID)
+################
+
+colnames(gse$targets)
+head(annot)
 head(top_probes, 20)
 top_probes |>
     tibble::rownames_to_column("probeid") |>
-    left_join(annot, by=c("probeid"="ENSEMBL_ID")) |>
+    left_join(annot, by = c("probeid" = "ENSEMBL_ID")) |>
     arrange(desc(ATLa_ATLc)) |>
     head(50)
-    #pull(probeid)
-    mutate(sign=ifelse(adj.P.Val<0.0001 & abs(logFC) > 4, "Sign", "No")) |>
-    dplyr::mutate(adp=-log10(adj.P.Val)) |>
-    tidyplots::tidyplot(x=logFC, y=adp, color=sign) |>
-    tidyplots::add_data_points(alpha=.5) |>
-    tidyplots::add_data_labels_repel(label=probeid, data=filter_rows(sign=="Sign"), color="black") |>
+# pull(probeid)
+mutate(sign = ifelse(adj.P.Val < 0.0001 & abs(logFC) > 4, "Sign", "No")) |>
+    dplyr::mutate(adp = -log10(adj.P.Val)) |>
+    tidyplots::tidyplot(x = logFC, y = adp, color = sign) |>
+    tidyplots::add_data_points(alpha = .5) |>
+    tidyplots::add_data_labels_repel(label = probeid, data = filter_rows(sign == "Sign"), color = "black") |>
     tidyplots::adjust_x_axis_title("Log2(Fold Change)") |>
     tidyplots::adjust_y_axis_title("-Log10(Adjusted Pvalue)") |>
     tidyplots::remove_legend() |>
     tidyplots::save_plot("CD7pos_CADM1vsnoCADM1.png",
-    bg="transparent")
+        bg = "transparent"
+    )
 
 
 top_probes |>
-  tibble::rownames_to_column("probeid") |>
-  arrange(desc(logFC)) |>
-  head(50)
-
-
-summary(decideTests(fit2[,1],lfc=1))
-
-degenes = top_probes |>
     tibble::rownames_to_column("probeid") |>
-    left_join(annot, by=c("probeid"="ENSEMBL_ID")) |>
-    pull(probeid) 
+    arrange(desc(logFC)) |>
+    head(50)
 
-genes = agilent_data_avg$E[degenes,] |>
-  as.data.frame() |>
-  tibble::rownames_to_column("ENSEMBL_ID") |>
-  left_join(annot[,c("ENSEMBL_ID", "GENE_SYMBOL")], by=c("ENSEMBL_ID")) |>
-  tibble::column_to_rownames("GENE_SYMBOL") |>
-  dplyr::select(-ENSEMBL_ID) |>
-  as.matrix()
 
-pd7m = pd7 |>
-  tibble::column_to_rownames("ID")
+summary(decideTests(fit2[, 1], lfc = 1))
+
+degenes <- top_probes |>
+    tibble::rownames_to_column("probeid") |>
+    left_join(annot, by = c("probeid" = "ENSEMBL_ID")) |>
+    pull(probeid)
+
+genes <- agilent_data_avg$E[degenes, ] |>
+    as.data.frame() |>
+    tibble::rownames_to_column("ENSEMBL_ID") |>
+    left_join(annot[, c("ENSEMBL_ID", "GENE_SYMBOL")], by = c("ENSEMBL_ID")) |>
+    tibble::column_to_rownames("GENE_SYMBOL") |>
+    dplyr::select(-ENSEMBL_ID) |>
+    as.matrix()
+
+pd7m <- pd7 |>
+    tibble::column_to_rownames("ID")
 
 
 # 1. Prepare annotation data - ensure it's properly formatted
 annotation_data <- data.frame(
-  ATLType = factor(pd7m$atltype),  # Convert to factor explicitly
-  row.names = rownames(pd7m)       # Ensure this matches your column names in 'genes'
+    ATLType = factor(pd7m$atltype), # Convert to factor explicitly
+    row.names = rownames(pd7m) # Ensure this matches your column names in 'genes'
 )
 
 # 2. Verify the annotation data
@@ -239,26 +329,26 @@ print(head(annotation_data))
 print(table(annotation_data$ATLType))
 
 # 3. Create color mapping - ensure colors match actual factor levels
-categories <- levels(annotation_data$ATLType)  # Use levels() instead of unique()
+categories <- levels(annotation_data$ATLType) # Use levels() instead of unique()
 n_categories <- length(categories)
 
 # Check if we have enough colors
-if(n_categories != 3) {
-  warning(paste("You have", n_categories, "categories but provided 3 colors"))
-  # Generate enough colors if needed
-  colors <- colorRampPalette(c("#66C2A5", "#FC8D62", "#8DA0CB"))(n_categories)
+if (n_categories != 3) {
+    warning(paste("You have", n_categories, "categories but provided 3 colors"))
+    # Generate enough colors if needed
+    colors <- colorRampPalette(c("#66C2A5", "#FC8D62", "#8DA0CB"))(n_categories)
 } else {
-  colors <- c("#66C2A5", "#FC8D62", "#8DA0CB")
+    colors <- c("#66C2A5", "#FC8D62", "#8DA0CB")
 }
 
 annotation_colors <- list(
-  ATLType = setNames(colors, categories)
+    ATLType = setNames(colors, categories)
 )
 
 # 4. Verify matrix and annotation dimensions
 stopifnot(
-  identical(colnames(genes), rownames(annotation_data)),
-  ncol(genes) == nrow(annotation_data)
+    identical(colnames(genes), rownames(annotation_data)),
+    ncol(genes) == nrow(annotation_data)
 )
 
 # 5. Create the heatmap with error handling
@@ -271,35 +361,35 @@ pheatmap(
     show_rownames = TRUE,
     show_colnames = TRUE,
     main = "Differential gene expression of CD4+CD7-CADM1+ by Status",
-  filename = "publication_heatmap.png",
-  width = 7,  # Nature standard single-column
-  height = 5,
-  units = "in",
-  family = "Arial"  # Embed font
+    filename = "publication_heatmap.png",
+    width = 7, # Nature standard single-column
+    height = 5,
+    units = "in",
+    family = "Arial" # Embed font
 )
 
 
 annotation_data <- data.frame(
-  ATLType = pd7$atltype,  # Replace 'atltype' with your actual column name
-  row.names = rownames(pd7m)  # Must match your sample names
+    ATLType = pd7$atltype, # Replace 'atltype' with your actual column name
+    row.names = rownames(pd7m) # Must match your sample names
 )
-annotation_data 
+annotation_data
 
 categories <- unique(annotation_data$ATLType)
 
 annotation_colors <- list(
-  ATLType = c("#66C2A5", "#FC8D62", "#8DA0CB")  # Must match factor levels
+    ATLType = c("#66C2A5", "#FC8D62", "#8DA0CB") # Must match factor levels
 )
 names(annotation_colors$ATLType) <- levels(annotation_data$ATLType)
 
 pheatmap(
-  mat = genes,
-  scale = "row",
-  annotation_col = annotation_data,
-  annotation_colors = annotation_colors,
-  show_rownames = TRUE,  # Often better for large datasets
-  show_colnames = FALSE,
-  main = "Gene Expression by ATL Type"
+    mat = genes,
+    scale = "row",
+    annotation_col = annotation_data,
+    annotation_colors = annotation_colors,
+    show_rownames = TRUE, # Often better for large datasets
+    show_colnames = FALSE,
+    main = "Gene Expression by ATL Type"
 )
 colors
 annotation_data

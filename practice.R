@@ -210,38 +210,94 @@ head(design, 20)
 levels(factor(pd7$atl_subtype2))
 contrast.matrix <- makeContrasts(
     ATL_HAMTSP = ATL - HAMTSP,
-     ATL_AC = ATL - AC,
-     HAM_TSP_AC = HAMTSP - AC,
+    ATL_AC = ATL - AC,
+    HAM_TSP_AC = HAMTSP - AC,
     levels = design
 )
-fit2 <- lmFit(gse, design) %>%
+fit2 <- lmFit(gse1, design) %>%
     contrasts.fit(contrast.matrix) %>%
     eBayes()
 
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf, adjust.method = "BH") #,  p.value = 0.05)
-
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH") #,  p.value = 0.01)
+top_probes
 
 #--------------------------------------------------------
 # Part 7: Manipulation
 #--------------------------------------------------------
 colnames(top_probes)
 
-top_probes |>
-    select(-c(1:5, 7)) |>
+"""
+Proximal TCR signaling: CTLA-4, PD-1, SHP-1, SHP-2, LYP, Cbl-b, GRAIL, SIT, PAG, Dok family members, Drak2, and CD5. 
+These regulators often target kinases like Lck and ZAP-70, adaptor proteins like LAT and SLP-76, or the CD3ζ chain itself.   
+Calcium signaling: Some negative regulators, such as CTLA-4 and Dok family members, can influence calcium mobilization and downstream signaling events.   
+MAPK pathway: Negative regulation of the MAPK pathway, which is critical for gene expression and effector functions, is mediated by CTLA-4, PD-1, SHP-2, Dok family members, and RASA2.   
+NF-κB pathway: Several negative regulators, including CTLA-4, PD-1, Cbl-b, Itch, A20, and Peli1, target the NF-κB signaling pathway, which controls the expression of genes involved in inflammation, apoptosis, and immune responses.   
+NFAT pathway: CTLA-4, PD-1, and MDM2 are among the negative regulators that can modulate the activity of NFAT transcription factors, which are critical for cytokine production.   
+PI3K/Akt/mTOR pathway: The PI3K/Akt/mTOR pathway, involved in cell survival, growth, and metabolism, is targeted by negative regulators such as PD-1, Cbl-b, Peli1, and TSC1/TSC2.
+"""
+probes = top_probes |>
+    dplyr::select(-c(1:5, 7)) |>
     as_tibble() |>
-    arrange((ATL_AC)) |>
-    dplyr::filter(GENE_SYMBOL=="CD83") # |>
-    dplyr::filter(ATL_AC > ATL_HAMTSP, HAM_TSP_AC>0, adj.P.Val < 0.01) 
-datatable(IF)
+    arrange((ATL_AC)) #|>
 
-cd4_genes <- c("CD4", "CD3D", "CD3E", "CD3G", "FOXP3", "TBX21", "GATA3", "RORC", 
-               "IFNG", "IL4", "IL17A", "IL10", "CTLA4", "PDCD1")
+probes |>
+    dplyr::filter(GENE_SYMBOL=="NT5E") # |>
+    dplyr::filter(ATL_AC > ATL_HAMTSP, HAM_TSP_AC>0, adj.P.Val < 0.05)  |>
+    pull(GENE_SYMBOL) 
+
+early_tcr=c("LCK", "CD3D", "CD3E", "CD3G", "LAT", "LCP2") # ZAP70, SLP76, ITK
+
+neg_tcr=c("CD5", "PTPN6", "PTPN22","SOCS1", "CBLB", "DUSP14", "CD6", "PDCD1LG2", "PTPN12", "DOK1", "MDM2", "JUNB", "SHC1", "UBD", "ATM", "BTK", "IL1RL1", "IFNGR2", "IFNGR1", "GNAI3", "SOCS2") #DRAK2 , PTPN11
+
+
+probess
+
+probess = probes |>
+    dplyr::left_join(tcr_regulation_df, by=c("GENE_SYMBOL"="elements")) |>
+    pull("GENE_SYMBOL")
+
+tcr_regulation_df <- data.frame(
+  elements = c(early_tcr, neg_tcr),
+  type = c(rep("early_tcr", length(early_tcr)), 
+           rep("neg_tcr", length(neg_tcr)))
+)
+neg_tcr
+
+annotationdf =data.frame(
+    row.names = pd7$ID,
+    Subtype=pd7$atl_subtype2)
+
+rownames(annotationdf)
+heatmapgenes = gse1$A[neg_tcr,]
+heatmapgenes
+gse1$A[c("NFATC4"),]
+
+probess 
+pheatmap(
+    mat = heatmapgenes,
+    scale = "row",
+    annotation_col = annotationdf,
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    cellheight=15,
+    main = "Differential gene expression ") #,
+  filename = "2publication_heatmap.png",
+  width = 10,  # Nature standard single-column
+  height = 7,
+  units = "in",
+  family = "Arial"  # Embed font
+)
 library(DT)
 annot |>
-    dplyr::filter(str_detect(GENE_NAME, "Bcl1")) #|>
+    dplyr::filter(str_detect(GENE_NAME, "adenosin") | str_detect(SYMBOL, "NT5E")) #|>
     pull(SYMBOL)
+
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
 IF
+colnames(annot)
 topprobes <- top_probes |>
     as.data.frame() |>
     tibble::rownames_to_column("probeid") 
@@ -331,8 +387,8 @@ stopifnot(
 
 pheatmap(
     mat = genes,
-    scale = "row",
-    annotation_col = annotation_data,
+    scale = "column",
+    #annotation_col = annotation_data,
     show_rownames = TRUE,
     show_colnames = TRUE,
     cellheight=15,
