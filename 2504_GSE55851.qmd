@@ -226,7 +226,7 @@ fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 fit2
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf, adjust.method = "BH", sort.by = "B") # , p.value = 0.01)
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH", sort.by = "B" , p.value = 0.01)
 colnames(top_probes)
 top_probes |>
   dplyr::filter(grepl("ADORA3", GENE_SYMBOL))
@@ -277,7 +277,7 @@ head(top_probes, 20)
 top_probes |>
     tibble::rownames_to_column("probeid") |>
     left_join(annot, by = c("probeid" = "ENSEMBL_ID")) |>
-    arrange(desc(ATLa_ATLc)) |>
+    arrange(desc(CD7N_CD7D)) |>
     head(50)
 # pull(probeid)
 mutate(sign = ifelse(adj.P.Val < 0.0001 & abs(logFC) > 4, "Sign", "No")) |>
