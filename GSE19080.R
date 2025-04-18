@@ -32,6 +32,7 @@ if (!dir.exists(paste0(".temp/", id))) {
 # Obtaining Metadata
 meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
 meta <- meta[[1]]
+
 head(fData(meta))
 head(pData(meta))
 colnames(exprs(meta))
@@ -95,15 +96,11 @@ agilent_data <- read.maimages(
     names = pd7$ID,
     other.columns = list(
         Flag = "Ignore Filter"))
-
-
 #--------------------------------------------------------
 # Part 4: Manipulating targets
 #--------------------------------------------------------
-
 # Convert targets to tibble for easy joining
-
-agilent_data$targets = agilent_data1$targets |>
+agilent_data$targets = agilent_data$targets |>
     as_tibble(rownames = "sampleName") |>
     left_join(pd7, by = c("sampleName" = "ID")) |>
     as.data.frame() |>
@@ -112,25 +109,25 @@ agilent_data$targets = agilent_data1$targets |>
 #### gene Annotation
 gpl2 <- getGEO("GPL9686")
 
-dim(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
+head(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
+annot <- Table(gpl2)[, c("SYMBOL", "GENE_NAME", "GB_ACC")]
 
-annot <- Table(gpl2)[, c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")] 
+# Add gene symbols to agilent_data
+head(agilent_data$gene)
+agilent_data$genes <- agilent_data$genes |>
+  dplyr::left_join(annot, by=c("Name"="GB_ACC")) |>
+  mutate(is_control=factor(ifelse(is.na(SYMBOL) & is.na(GENE_NAME), "control", "gene")))
 
-# Add gene symbols to agilent_data1
-agilent_data$genes$GENE_SYMBOL <- annot$SYMBOL[match(agilent_data$genes$Name, annot$GB_ACC)]
+table(agilent_data$gene$is_control)
 
+#agilent_data$genes$GENE_SYMBOL <- annot$SYMBOL[match(agilent_data$genes$Name, annot$GB_ACC)]
 
-agilent_data$genes=agilent_data$genes |>
-    mutate(is_control=factor(ifelse(is.na(GENE_SYMBOL), "control", "gene")))
-
-table((agilent_data$genes$is_control))
-head(agilent_data$genes)
+table(agilent_data$genes$is_control)
 
 #--------------------------------------------------------
 # Part 5: QC
 #--------------------------------------------------------
 # (A) Use negative controls for background correction
-
 agilent_two_color_qc <- function(agilent_data,
                                 verbose = TRUE) {
     # 1. Input Validation --------------------------------------------------------
@@ -178,14 +175,13 @@ agilent_two_color_qc <- function(agilent_data,
     agilent_data$genes <- droplevels(agilent_data$genes)
     return(agilent_data)
 }
-colnames(agilent_data$genes)
 
+## Apply the function to the data
 gse1 = agilent_two_color_qc(agilent_data)
-
 ##### PCA
-
 dim(gse1)
 boxplot(gse1$M, main="Normalized Negative Controls")
+
 pd7
 pca <- prcomp(t(gse1$M))
 rownames(pca$x)
@@ -219,14 +215,12 @@ fit2 <- lmFit(gse1, design) %>%
     eBayes()
 
 # Get significant probes (FDR < 0.01)
-top_probes <- topTable(fit2, number = Inf, adjust.method = "BH") #,  p.value = 0.01)
-top_probes
+top_probes <- topTable(fit2, number = Inf, adjust.method = "BH" ,  p.value = 0.01)
+head(top_probes)
 
 #--------------------------------------------------------
 # Part 7: Manipulation
 #--------------------------------------------------------
-colnames(top_probes)
-
 """
 Proximal TCR signaling: CTLA-4, PD-1, SHP-1, SHP-2, LYP, Cbl-b, GRAIL, SIT, PAG, Dok family members, Drak2, and CD5. 
 These regulators often target kinases like Lck and ZAP-70, adaptor proteins like LAT and SLP-76, or the CD3ζ chain itself.   
@@ -236,44 +230,45 @@ NF-κB pathway: Several negative regulators, including CTLA-4, PD-1, Cbl-b, Itch
 NFAT pathway: CTLA-4, PD-1, and MDM2 are among the negative regulators that can modulate the activity of NFAT transcription factors, which are critical for cytokine production.   
 PI3K/Akt/mTOR pathway: The PI3K/Akt/mTOR pathway, involved in cell survival, growth, and metabolism, is targeted by negative regulators such as PD-1, Cbl-b, Peli1, and TSC1/TSC2.
 """
-probes = top_probes |>
-    dplyr::select(-c(1:5, 7)) |>
-    as_tibble() |>
-    arrange((ATL_AC)) #|>
-
-probes |>
-    dplyr::filter(GENE_SYMBOL=="NT5E") # |>
-    dplyr::filter(ATL_AC > ATL_HAMTSP, HAM_TSP_AC>0, adj.P.Val < 0.05)  |>
-    pull(GENE_SYMBOL) 
-
 early_tcr=c("LCK", "CD3D", "CD3E", "CD3G", "LAT", "LCP2") # ZAP70, SLP76, ITK
 
 neg_tcr=c("CD5", "PTPN6", "PTPN22","SOCS1", "CBLB", "DUSP14", "CD6", "PDCD1LG2", "PTPN12", "DOK1", "MDM2", "JUNB", "SHC1", "UBD", "ATM", "BTK", "IL1RL1", "IFNGR2", "IFNGR1", "GNAI3", "SOCS2") #DRAK2 , PTPN11
 
+colnames(top_probes)
 
-probess
+top_probes |>
+    dplyr::select(-c(1:5, 8)) |>
+    #dplyr::filter(GENE_SYMBOL =="ZNF856B") #|>
+    dplyr::filter(SYMBOL %in% neg_tcr) |>
+    as_tibble() |>
+    arrange(desc(ATL_AC)) #|>
 
-probess = probes |>
-    dplyr::left_join(tcr_regulation_df, by=c("GENE_SYMBOL"="elements")) |>
-    pull("GENE_SYMBOL")
+datatable(probesx |>
+    dplyr::select(-c(1:5, 7:8, 10:12)) |>
+    dplyr::filter(adj.P.Val < 0.01) |>
+        arrange(desc(ATL_AC))) #|>)
 
-tcr_regulation_df <- data.frame(
-  elements = c(early_tcr, neg_tcr),
-  type = c(rep("early_tcr", length(early_tcr)), 
-           rep("neg_tcr", length(neg_tcr)))
-)
-neg_tcr
+negtcr_gbacc = annot |>
+    dplyr::filter(SYMBOL %in% neg_tcr) |>
+    pull(GB_ACC)
 
+#--------------------------------------------------------
+# Part 8: Heatmap
+#--------------------------------------------------------
+# Create a heatmap of the top differentially expressed genes
+# Filter the top genes based on your criteria
 annotationdf =data.frame(
     row.names = pd7$ID,
     Subtype=pd7$atl_subtype2)
+class(heatmapgenes)
+heatmapgenes = gse1$A[gse1$genes$SYMBOL %in% neg_tcr,] |>
+    as.data.frame() |>
+    tibble::rownames_to_column("GB_ACC") |>
+    left_join(annot[,c("GB_ACC", "SYMBOL")], by=c("GB_ACC")) |>
+    tibble::column_to_rownames("SYMBOL") |>
+    dplyr::select(-GB_ACC) |>
+    as.matrix()
 
-rownames(annotationdf)
-heatmapgenes = gse1$A[neg_tcr,]
-heatmapgenes
-gse1$A[c("NFATC4"),]
-
-probess 
 pheatmap(
     mat = heatmapgenes,
     scale = "row",
@@ -281,284 +276,105 @@ pheatmap(
     show_rownames = TRUE,
     show_colnames = TRUE,
     cellheight=15,
-    main = "Differential gene expression ") #,
-  filename = "2publication_heatmap.png",
-  width = 10,  # Nature standard single-column
-  height = 7,
-  units = "in",
-  family = "Arial"  # Embed font
+    main = "TCR Negative Regulators",
+    filename = "2504_negativeTCRregulators.png",
+    width = 10,  # Nature standard single-column
+    height = 7,
+    units = "in",
+    family = "Arial"  # Embed font
 )
-library(DT)
-annot |>
-    dplyr::filter(str_detect(GENE_NAME, "adenosin") | str_detect(SYMBOL, "NT5E")) #|>
-    pull(SYMBOL)
 
+#--------------------------------------------------------
+# Part 9: Gene Annotation
+#--------------------------------------------------------
+# Gene annotation
 library(org.Hs.eg.db)
 library(AnnotationDbi)
+neg_tcr
+current_symbol <- mapIds(
+    org.Hs.eg.db,
+    keys = neg_tcr,        # Input symbol/alias
+    column ="SYMBOL",    # Output column (current symbol)
+    keytype = "ALIAS",    # Input type
+    multiVals = "CharacterList"   # Return first match if multiple exist
+)
 
-IF
-colnames(annot)
-topprobes <- top_probes |>
-    as.data.frame() |>
-    tibble::rownames_to_column("probeid") 
-    
-topprobes |>
-    arrange(adj.P.Val) |>
-    head(50)
+#--------------------------------------------------------
+# Part 10: Volcano plot
+#--------------------------------------------------------
 
 top_probes |>
-    filter(GENE_SYMBOL == "ZCCHC12")
-
-topprobes |>
-    mutate(sign = ifelse(adj.P.Val < 0.01 & abs(logFC) > 1.2, "Sign", "No")) |>
+    mutate(sign = ifelse(adj.P.Val < 0.01 & abs(ATL_AC) > 1.5, "Sign", "No")) |>
     dplyr::mutate(adp = -log10(adj.P.Val)) |>
-    tidyplots::tidyplot(x = logFC, y = adp, color = sign) |>
+    tidyplots::tidyplot(x = ATL_AC, y = adp, color = sign) |>
     tidyplots::add_data_points(alpha = .5) |>
-    tidyplots::add_data_labels_repel(label = GENE_SYMBOL, data = filter_rows(sign == "Sign"), color = "black") |>
+    tidyplots::add_data_labels_repel(label = SYMBOL, data = filter_rows(sign == "Sign"), color = "black") |>
     tidyplots::adjust_x_axis_title("Log2(Fold Change)") |>
     tidyplots::adjust_y_axis_title("-Log10(Adjusted Pvalue)") |>
     tidyplots::remove_legend() |>
     tidyplots::save_plot("ATLvATLc.png",
-        bg = "transparent"
-
-
-top_probes
-
-
-#### heatmap
-
-degenes = top_probes |>
-    tibble::rownames_to_column("probeid") |>
-    pull(probeid) 
-
-genes = gse_final$E[degenes,] |>
-  as.data.frame() |>
-  tibble::rownames_to_column("ENSEMBL_ID") |>
-  left_join(annot[,c("ENSEMBL_ID", "GENE_SYMBOL")], by=c("ENSEMBL_ID")) |>
-  tibble::column_to_rownames("GENE_SYMBOL") |>
-  dplyr::select(-ENSEMBL_ID) |>
-  as.matrix()
-genes
-
-
-
-
-pd7m = pd7 |>
-  tibble::column_to_rownames("ID")
-pd7m
-
-# 1. Prepare annotation data - ensure it's properly formatted
-annotation_data <- data.frame(
-  agec = factor(pd7m$agec),  # Convert to factor explicitly
-  atl = factor(pd7m$atl_subtype2),
-  row.names = rownames(pd7m)       # Ensure this matches your column names in 'genes'
-)
-
-# 2. Verify the annotation data
-print(head(annotation_data))
-print(table(annotation_data$atl))
-
-# 3. Create color mapping - ensure colors match actual factor levels
-categories <- levels(annotation_data$atl)  # Use levels() instead of unique()
-categories_2 = levels(annotation_data$agec)
-n_categories <- length(categories)
-n2_categories = length(categories)
-
-# Check if we have enough colors
-if(n_categories != 3) {
-  warning(paste("You have", n_categories, "categories but provided 3 colors"))
-  # Generate enough colors if needed
-  colors <- colorRampPalette(c("#66C2A5", "#FC8D62", "#8DA0CB"))(n_categories)
-} else {
-  colors <- c("#66C2A5", "#FC8D62", "#8DA0CB")
-}
-
-annotation_colors <- list(
-  ATLType = setNames(colors, categories)
-)
-
-# 4. Verify matrix and annotation dimensions
-stopifnot(
-  identical(colnames(genes), rownames(annotation_data)),
-  ncol(genes) == nrow(annotation_data)
-)
-
-# 5. Create the heatmap with error handling
-
-pheatmap(
-    mat = genes,
-    scale = "column",
-    #annotation_col = annotation_data,
-    show_rownames = TRUE,
-    show_colnames = TRUE,
-    cellheight=15,
-    main = "Differential gene expression ",
-  filename = "2publication_heatmap.png",
-  width = 10,  # Nature standard single-column
-  height = 7,
-  units = "in",
-  family = "Arial"  # Embed font
-)
-?pheatmap
-
-annotation_data <- data.frame(
-  ATLType = pd7$atltype,  # Replace 'atltype' with your actual column name
-  row.names = rownames(pd7m)  # Must match your sample names
-)
-annotation_data 
-
-categories <- unique(annotation_data$ATLType)
-
-annotation_colors <- list(
-  ATLType = c("#66C2A5", "#FC8D62", "#8DA0CB")  # Must match factor levels
-)
-names(annotation_colors$ATLType) <- levels(annotation_data$ATLType)
-
-pheatmap(
-  mat = genes,
-  scale = "row",
-  annotation_col = annotation_data,
-  annotation_colors = annotation_colors,
-  show_rownames = TRUE,  # Often better for large datasets
-  show_colnames = FALSE,
-  main = "Gene Expression by ATL Type"
-)
-```
-
-#####################
-pd7_2 = pd |>
-    filter(ID%in%c(paste0("GSM4723", 74:81)))
-pd7_2
-agilent_data2 <- read.maimages(
-    files = file.path(".temp", id, pd7_2$file),
-    source = "genepix",
-    green.only = FALSE,
-    names = pd7_2$ID)
-
-################
-
-
+        bg = "transparent")
 
 #--------------------------------------------------------
 # Part 3B: HD - Capturing targets
 #--------------------------------------------------------
 # Subsettting files (here we have two different platforms) 
-hd_pd7 = pd |>
+
+pd7_2 = pd |>
     filter(ID%in%c(paste0("GSM4723", 74:81)))
 
-# Re-read the raw files, this was a quantarray (described in metadata)
-agilent_data <- read.maimages(
-    files = file.path(".temp", id, hd_pd7$file),
+agilent_data2 <- read.maimages(
+    files = file.path(".temp", id, pd7_2$file),
     source = "genepix",
     green.only = FALSE,
-    names = hd_pd7$ID)
-
-head(agilent_data)
+    names = pd7_2$ID)
 #--------------------------------------------------------
-# Part 4: Manipulating targets
+# Part 4B: Manipulating targets
 #--------------------------------------------------------
-
 # Convert targets to tibble for easy joining
-
-agilent_data$targets = agilent_data$targets |>
+agilent_data2$targets = agilent_data2$targets |>
     as_tibble(rownames = "sampleName") |>
-    left_join(hd_pd7, by = c("sampleName" = "ID")) |>
+    left_join(pd7_2, by = c("sampleName" = "ID")) |>
     as.data.frame() |>
     tibble::column_to_rownames("sampleName")
 
-agilent_data$targets
 #### gene Annotation
-
 gpl2 <- getGEO("GPL9686")
+annot <- Table(gpl2)[, c("SYMBOL", "GENE_NAME", "GB_ACC")]
 
-dim(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
-
-annot <- Table(gpl2)[, c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")] 
-
-head(agilent_data$genes)
-# Add gene symbols to agilent_data1
-agilent_data$genes <- agilent_data$genes |>
+# Add gene symbols to agilent_data
+head(agilent_data2$gene)
+agilent_data2$genes <- agilent_data2$genes |>
     tidyr::separate(
-    Name, 
-    into = c("GENE_SYMBOL", "Annot", "probename"), 
-    sep = ":"  # Adjust delimiter
-  ) |>
-  dplyr::left_join(annot[, c("SYMBOL", "GB_ACC")], by=c("probename"="GB_ACC")) 
-
-table(agilent_data$genes$is_control)
-
-
-agilent_data$genes=agilent_data$genes |>
-    mutate(is_control=factor(ifelse(is.na(SYMBOL), "control", "gene")))
-
-table((agilent_data$genes$is_control))
-table((agilent_data$genes$is_control))
+    Name,
+    into = c("GENE_SYMBOL", "Annot", "probename"),
+    sep = ":")  |> 
+  dplyr::left_join(annot, by=c("probename"="GB_ACC")) |>
+  mutate(is_control=factor(ifelse(is.na(SYMBOL) & is.na(GENE_NAME), "control", "gene")))
 
 #--------------------------------------------------------
 # Part 5: QC
 #--------------------------------------------------------
-# (A) Use negative controls for background correction
+# Convert targets to tibble for easy joining
 
-agilent_two_color_qc <- function(agilent_data,
-                                verbose = TRUE) {
-    # 1. Input Validation --------------------------------------------------------
-    required_components <- c("R", "G", "genes", "targets")
-    missing_comps <- setdiff(required_components, names(agilent_data))
-    if(length(missing_comps)) {
-        stop("Missing required components: ", paste(missing_comps, collapse=", "))
-    }
-    # 2. Dimensional Checks ----------------------------------------------------
-    if(verbose) message("\nVerifying dimensions...")
-    dim_checks <- list(
-        list(nrow(agilent_data$R), nrow(agilent_data$G), "Channel row mismatch"),
-        list(ncol(agilent_data$R), ncol(agilent_data$G), "Channel column mismatch"),
-        list(nrow(agilent_data$R), nrow(agilent_data$genes), "Gene annotation row mismatch"),
-        list(ncol(agilent_data$R), nrow(agilent_data$targets), "Sample annotation mismatch")
-    )
-    
-    for(chk in dim_checks) {
-        if(chk[[1]] != chk[[2]]) stop(chk[[3]])
-    }
+## Apply the function to the data
+gse2 = agilent_two_color_qc(agilent_data2)
 
-    # 3. Missing Value Analysis ------------------------------------------------
-    if(verbose) message("\nAnalyzing missing values...")
-    na_stats <- list(
-        R = list(
-            probes = rowMeans(is.na(agilent_data$R)),
-            samples = colMeans(is.na(agilent_data$R))
-        ),
-        G = list(
-            probes = rowMeans(is.na(agilent_data$G)),
-            samples = colMeans(is.na(agilent_data$G))
-        )
-    )
-    
-    # 4. Background correction
-    agilent_data <- limma::backgroundCorrect(agilent_data, method="normexp", offset=20) 
-    # 5. Normalization
-    agilent_data <- limma::normalizeWithinArrays(agilent_data, method="loess")
-    agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
+##### PCA
+dim(gse2)
+boxplot(gse2$M, main="Normalized Negative Controls")
 
-    # 6. technical replicates reduction by probename
-    agilent_data <- limma::avereps(agilent_data, ID=agilent_data$genes$Name)
-    agilent_data <- agilent_data[agilent_data$genes$is_control=="gene", ]
-    agilent_data <- limma::avereps(agilent_data, ID=agilent_data$genes$GENE_SYMBOL)
-    agilent_data$genes <- droplevels(agilent_data$genes)
-    return(agilent_data)
-}
+#--------------------------------------------------------
+# Part 6B: Merging pending, it is necessary to merge and then to sva - batch, 
+#Extracting 
 
+merged_data <- merge(
+  as.data.frame(gse1$M),
+  as.data.frame(gse2$M),
+  by.x = "genes$Name",
+  by.y = "genes$probename",
+  all = FALSE  # Keep only matching genes
+)
+class(gse1)
 
-gse = agilent_two_color_qc(agilent_data)
-dim(gse1)
-dim(gse)
-class(gse)
-boxplot(gse$M, main="Normalized Negative Controls")
-pca <- prcomp(t(gse$M))
-rownames(pca$x)
-pca = pca$x |>
-    as.data.frame() 
-pca |>
-    tibble::rownames_to_column("ID") |>
-    dplyr::left_join(pd7, by="ID") |> 
-    tidyplots::tidyplot(x=PC1, y=PC2, color=atl_subtype) |>
-    tidyplots::add_data_points()
+head(gse2$genes)
