@@ -29,44 +29,11 @@ if (!dir.exists(paste0(".temp/", id))) {
 }
 
 # Obtaining Metadata
-meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
-length(meta)
-meta <- meta[[1]]
-
-options(download.file.method = "curl")
-
-raw <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/suppl/GSE225759_RAW.tar"
-matrix <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/matrix/GSE225759_series_matrix.txt.gz"
-
-download.file(matrix, destfile = "./.temp/GSE225759.gz", method = "curl")
-dir.create("./.temp", showWarnings = FALSE, recursive = TRUE)
-options(GEOquery.integrate.https = FALSE)
-
-# Retrieving dataset as series matrix
-gset <- getGEO("GSE225759",
-    GSEMatrix = TRUE,
-    getGPL = FALSE,
-    destdir = "./.temp"
-)
-
-# Check if there are multiple platforms
-length(gset)
-
-if (length(gset) > 1) idx <- grep("GPL33154", attr(gset, "names")) else idx <- 1
-# A list: gse[[1]]
-gset <- gset[[idx]]
-gset <- gset[[1]]
-gset
-
-# Exploring the dataset
-head(pData(gset))
-colnames(pData(gset))
-unique(pData(gset)$characteristics_ch1.5)
-tail(pData(gset))
-fData(gset)
-exprs(gset)
-#####################################################
-# Assuming that everything is OK (it has been normalized)
+metaff <- getGEO(id, GSEMatrix = TRUE, getGPL = FALSE, destdir = ".temp")
+length(metaff)
+meta <- metaff[[1]]
+colnames(exprs(meta))
+head(pData(meta))
 
 # Metadata wrangling
 metadata <- pData(gset) |>
@@ -94,7 +61,22 @@ metadata <- pData(gset) |>
         geo_accession,
         supplementary_file,
         caseID,
-        final_subtype
+        final_subtype)
+
+options(download.file.method = "curl")
+
+raw <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/suppl/GSE225759_RAW.tar"
+matrix <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/matrix/GSE225759_series_matrix.txt.gz"
+
+download.file(matrix, destfile = "./.temp/GSE225759.gz", method = "curl")
+dir.create("./.temp", showWarnings = FALSE, recursive = TRUE)
+options(GEOquery.integrate.https = FALSE)
+
+
+#####################################################
+# Assuming that everything is OK (it has been normalized)
+
+
     )
 # testing subtypes, it has supplementary files links
 unique(metadata$final_subtype)
