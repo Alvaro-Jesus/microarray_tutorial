@@ -1,33 +1,53 @@
 
 # Gene Expression Signatures for the Accurate Diagnosis of Peripheral T-Cell Lymphoma Entities in the Routine Clinical Practice
 
-CEL > SOFT > Matrix
 ```{r}
-# Loading packages
-pacman::p_load(httpgd,
-    GEOquery,
-    limma,
-    umap,
-    DT,
-    tidyverse,
-    curl,
-    pheatmap,
-    ggrepel)
+#--------------------------------------------------------
+# Part 1: loading packages and functions
+#--------------------------------------------------------
+pacman::p_load(
+    GEOquery, tidyverse, ggrepel, limma, oligo, DT, pheatmap, tidyplots, affy, oligoClasses, testit
+)
+# function is log2transformed
+isLog2Transformed <- function(data) {
+    qx <- as.numeric(quantile(data, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm = T))
+    shouldBeLogged <- (qx[5] > 100) || (qx[6] - qx[1] > 50 && qx[2] > 0)
+    return(!shouldBeLogged)
+}
+#--------------------------------------------------------
+# Part 2: Obtaining metadata and raw data
+#--------------------------------------------------------
+
+# First obtain metadata
+id <- "GSE225759" # GPL4133
+
+# creating a temp folder
+if (!dir.exists(paste0(".temp/", id))) {
+    dir.create(paste0(".temp/", id))
+} else {
+    message("Folder already exists!")
+}
+
+# Obtaining Metadata
+meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
+length(meta)
+meta <- meta[[1]]
 
 options(download.file.method = "curl")
 
-raw="https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/suppl/GSE225759_RAW.tar"
-matrix="https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/matrix/GSE225759_series_matrix.txt.gz"
+raw <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/suppl/GSE225759_RAW.tar"
+matrix <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE225nnn/GSE225759/matrix/GSE225759_series_matrix.txt.gz"
 
-download.file(matrix, destfile = "./.temp/GSE225759.gz", method="curl")
+download.file(matrix, destfile = "./.temp/GSE225759.gz", method = "curl")
 dir.create("./.temp", showWarnings = FALSE, recursive = TRUE)
 options(GEOquery.integrate.https = FALSE)
 
 # Retrieving dataset as series matrix
-gset <- getGEO("GSE225759", 
-    GSEMatrix =TRUE, 
-    getGPL=FALSE,
-    destdir="./.temp")
+gset <- getGEO("GSE225759",
+    GSEMatrix = TRUE,
+    getGPL = FALSE,
+    destdir = "./.temp"
+)
 
 # Check if there are multiple platforms
 length(gset)
@@ -43,16 +63,16 @@ head(pData(gset))
 colnames(pData(gset))
 unique(pData(gset)$characteristics_ch1.5)
 tail(pData(gset))
-fData(gset) 
-exprs(gset) 
+fData(gset)
+exprs(gset)
 #####################################################
 # Assuming that everything is OK (it has been normalized)
 
 # Metadata wrangling
-metadata = pData(gset) |>
+metadata <- pData(gset) |>
     dplyr::rename(
-        caseID="case # from supplemental table9 (pmid35839444):ch1",
-        nanostring="nanosstringclass:ch1",
+        caseID = "case # from supplemental table9 (pmid35839444):ch1",
+        nanostring = "nanosstringclass:ch1",
     ) |>
     dplyr::select(
         geo_accession,
@@ -62,35 +82,39 @@ metadata = pData(gset) |>
         caseID
     ) |>
     dplyr::rename(
-        subtype="characteristics_ch1.5") |>
+        subtype = "characteristics_ch1.5"
+    ) |>
     mutate(
-        subtype=str_remove(subtype, "nanostringclass: "),
-        subtype=str_replace_na(subtype, ""),
-        nanostring=str_replace_na(nanostring, ""),
-        final_subtype=stringr::str_c(subtype, nanostring)
-        ) |>
-    select(geo_accession,
-    supplementary_file,
-    caseID,
-    final_subtype)
+        subtype = str_remove(subtype, "nanostringclass: "),
+        subtype = str_replace_na(subtype, ""),
+        nanostring = str_replace_na(nanostring, ""),
+        final_subtype = stringr::str_c(subtype, nanostring)
+    ) |>
+    select(
+        geo_accession,
+        supplementary_file,
+        caseID,
+        final_subtype
+    )
 # testing subtypes, it has supplementary files links
 unique(metadata$final_subtype)
 datatable(metadata)
 
-atl_ptcl_geo = metadata |>
-    filter(final_subtype%in%c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg", "Intermediate AITL/TBX21", "Intermediate.AITL/GATA3", "Intermediate AITL/GATA3")
-    ) |>
+atl_ptcl_geo <- metadata |>
+    filter(final_subtype %in% c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg", "Intermediate AITL/TBX21", "Intermediate.AITL/GATA3", "Intermediate AITL/GATA3")) |>
     pull(geo_accession)
 
-atl_ptcl = metadata |>
-    filter(final_subtype%in%c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg", "Intermediate AITL/TBX21", "Intermediate.AITL/GATA3", "Intermediate AITL/GATA3"))|>
-    select(geo_accession, final_subtype ) |>
-    mutate(final_subtype=dplyr::recode(final_subtype, ATLL="ATLL",
-    "PTCL-TBX21"="PTCLTBX", 
-    "PTCL-GATA3"="PTCLGATA", 
-    "ALCL-neg"="ALCLneg", 
-    "ALCL-pos"="ALCLpos",
-    "Intermediate AITL/TBX21"="iAITLTBX21", "Intermediate.AITL/GATA3"="iAITLGATA3", "Intermediate AITL/GATA3"="iAITLGATA3"))
+atl_ptcl <- metadata |>
+    filter(final_subtype %in% c("ATLL", "PTCL-TBX21", "PTCL-GATA3", "ENKTL", "AITL", "ALCL-pos", "ALCL-neg", "Intermediate AITL/TBX21", "Intermediate.AITL/GATA3", "Intermediate AITL/GATA3")) |>
+    select(geo_accession, final_subtype) |>
+    mutate(final_subtype = dplyr::recode(final_subtype,
+        ATLL = "ATLL",
+        "PTCL-TBX21" = "PTCLTBX",
+        "PTCL-GATA3" = "PTCLGATA",
+        "ALCL-neg" = "ALCLneg",
+        "ALCL-pos" = "ALCLpos",
+        "Intermediate AITL/TBX21" = "iAITLTBX21", "Intermediate.AITL/GATA3" = "iAITLGATA3", "Intermediate AITL/GATA3" = "iAITLGATA3"
+    ))
 
 ```
 
