@@ -33,7 +33,7 @@ Usual pipeline:
 ![](images/paste-5.png)
 
 |                   |                                      |                    |
-|:------------------|:---------------------------------|:-------------------|
+|:------------------|:--------------------------------|:-------------------|
 | Affymetrix        | .CEL                                 | affy, limma, oligo |
 | Agilent           | feature extraction file (txt or tsv) | limma              |
 | GenePix (scanner) | .gpr (tsv)                           |                    |
@@ -141,7 +141,7 @@ AffyBatch -\> ExpressionSet
 
 Set of probes of 20bp for one gene
 
-CEL > SOFT > Matrix
+CEL \> SOFT \> Matrix
 
 ## Tutorials
 
