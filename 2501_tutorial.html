@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.5.57">
+<meta name="generator" content="quarto-1.6.33">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -29,10 +29,10 @@ ul.task-list li input[type="checkbox"] {
 <script src="2501_tutorial_files/libs/quarto-html/tippy.umd.min.js"></script>
 <script src="2501_tutorial_files/libs/quarto-html/anchor.min.js"></script>
 <link href="2501_tutorial_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="2501_tutorial_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="2501_tutorial_files/libs/quarto-html/quarto-syntax-highlighting-07ba0ad10f5680c660e360ac31d2f3b6.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="2501_tutorial_files/libs/bootstrap/bootstrap.min.js"></script>
 <link href="2501_tutorial_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="2501_tutorial_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<link href="2501_tutorial_files/libs/bootstrap/bootstrap-b8d30c7eeda119d43de224048e70de8f.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 
 
 </head>
@@ -65,6 +65,78 @@ ul.task-list li input[type="checkbox"] {
 <section id="geo---gene-expression-omnibus-geo" class="level1">
 <h1>GEO - Gene Expression Omnibus (GEO)</h1>
 <p>Data repository from NCBI with functional genomic data.</p>
+<p>For Microarrays: ‘ink-jet printed’ onto slides (Agilent) or synthesised in situ (Affymetrix).</p>
+<p>Two-colors: two biological samples (experimental/test sample and control/reference sample) are labelled with different fluorescent dyes, usually Cyanine 3 (Cy3) and Cyanine 5 (Cy5). Equal amounts of labelled cDNA are then simultaneously hybridised to the same microarray chip. After this competitive hybridisation, the fluorescence measurements are made separately for each dye and represent the abundance of each gene in one sample (test sample, Cy5) relative to the other one (control sample, Cy3).</p>
+<p>Limitations: Previous genome knowledge, cross-hybridisation, limited dynamic range of detection owing to both background and saturation signals, complicated normalisation methods. (dye bias effect).</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="images/paste-2.png" class="img-fluid figure-img"></p>
+<figcaption>https://www.ebi.ac.uk/training/online/courses/functional-genomics-ii-common-technologies-and-data-analysis-methods/microarrays/</figcaption>
+</figure>
+</div>
+<p>Design: dye swap design or a reference design (Reference design is the most common).</p>
+<p><strong>Also necessary to include Technical</strong>&nbsp;replicates and&nbsp;<strong>biological</strong>&nbsp;replicates</p>
+<p><img src="images/paste-3.png" class="img-fluid"></p>
+<p>Usual pipeline:</p>
+<p><img src="images/paste-4.png" class="img-fluid"></p>
+<section id="a.-feature-extraction" class="level2">
+<h2 class="anchored" data-anchor-id="a.-feature-extraction">A. Feature extraction</h2>
+<p><img src="images/paste-5.png" class="img-fluid"></p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 26%">
+<col style="width: 45%">
+<col style="width: 27%">
+</colgroup>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Affymetrix &nbsp;</td>
+<td style="text-align: left;">.CEL</td>
+<td style="text-align: left;">affy, limma, oligo</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Agilent</td>
+<td style="text-align: left;">feature extraction file&nbsp;(txt or tsv)</td>
+<td style="text-align: left;">limma</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">GenePix (scanner)</td>
+<td style="text-align: left;">.gpr&nbsp;(tsv)</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Illumina</td>
+<td style="text-align: left;">.idat (binary)</td>
+<td style="text-align: left;">illuminaio</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">txt&nbsp;(tsv)</td>
+<td style="text-align: left;">lumi</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Nimblegen</td>
+<td style="text-align: left;">NimbleScan, .pair&nbsp;(tsv)</td>
+<td style="text-align: left;"></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="b-quality-control" class="level2">
+<h2 class="anchored" data-anchor-id="b-quality-control">B Quality Control</h2>
+<p><img src="images/paste-6.png" class="img-fluid"></p>
+</section>
+<section id="c-normalisation" class="level2">
+<h2 class="anchored" data-anchor-id="c-normalisation">C Normalisation</h2>
+<p>For&nbsp;Expression Atlas,&nbsp;Affymetrix&nbsp;microarray data is normalised using the ‘Robust Multi-Array Average’ (RMA) method within the ‘oligo’ R package.</p>
+<p>Agilent microarray data is normalised using the ‘limma’ package: ‘quantile normalisation’ for one-colour microarray data.</p>
+</section>
+<section id="d-differential-expression-analysis" class="level2">
+<h2 class="anchored" data-anchor-id="d-differential-expression-analysis">D Differential expression analysis</h2>
+<p>The ‘limma’ package that is used to identify differentially expressed genes incorporates a method to correct for multiple testing. This method creates a log2 fold change ratio between the test and control condition and an ‘adjusted’ p-value that rates the significance of the difference.</p>
+</section>
+<section id="definitions" class="level2">
+<h2 class="anchored" data-anchor-id="definitions">1. Definitions</h2>
 <ul>
 <li>Platform: an array or sequencer.</li>
 <li>Sample: sample source, protocols used, and expression data.</li>
@@ -72,8 +144,9 @@ ul.task-list li input[type="checkbox"] {
 <li>DataSet: curated collection of biologically and statistically comparable GEO Samples.</li>
 <li>Profile: expression measurements for an individual gene across all Samples in a DataSet.</li>
 </ul>
+</section>
 <section id="datasets-structure" class="level2">
-<h2 class="anchored" data-anchor-id="datasets-structure">1. Datasets structure</h2>
+<h2 class="anchored" data-anchor-id="datasets-structure">2. Datasets structure</h2>
 <ul>
 <li>assayData: raw or processed intensities (samples in columns).</li>
 <li>phenoData: metadata (samples in rows).</li>
@@ -86,38 +159,99 @@ ul.task-list li input[type="checkbox"] {
 <figcaption>[1]: Figure from Greg Tucker-Kellogg</figcaption>
 </figure>
 </div>
-<section id="geo-files" class="level3">
-<h3 class="anchored" data-anchor-id="geo-files">GEO Files</h3>
+</section>
+<section id="geo-files-cel-soft-matrix" class="level2">
+<h2 class="anchored" data-anchor-id="geo-files-cel-soft-matrix">3. GEO Files (CEL &gt;&gt; SOFT &gt;&gt; Matrix)</h2>
 <ul>
 <li>SOFT: information about the experiment (MIAME), estimates for each gene, transcript.</li>
 <li>MINiML: XML format.</li>
 <li>Series matrix file: directly to a spreadsheet.</li>
-<li>`.CEL` (Supplemental files): Original, unprocessed data.</li>
+<li><code>.CEL</code> (Supplemental files): Original, unprocessed data.</li>
 <li>GSE object: sample(GSM, GSMList) + platform(GPL, GPLList)</li>
-<li>`GDS2eSet` ExpressionSet with processed data.</li>
+<li><code>GDS2eSet</code> ExpressionSet with processed data.</li>
+</ul>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="images/paste-1.png" class="img-fluid figure-img"></p>
+<figcaption>[2]: GSE55851</figcaption>
+</figure>
+</div>
+<section id="additional-information" class="level4">
+<h4 class="anchored" data-anchor-id="additional-information">Additional information:</h4>
+<ul>
+<li><p>GEO Data Set(GDS): processed data on GEO (it may have multiple platforms). [GDS2eSet, GDSXXXX]</p></li>
+<li><p>ExpressionSet: only one platform, if [GSEMatrix=TRUE]</p></li>
+<li><p>GSE: [GSEMatrix=FALSE]</p></li>
 </ul>
 </section>
-</section>
-<section id="loading-packages" class="level2">
-<h2 class="anchored" data-anchor-id="loading-packages">1. Loading packages</h2>
 </section>
 <section id="normalisation" class="level2">
-<h2 class="anchored" data-anchor-id="normalisation">3. Normalisation</h2>
+<h2 class="anchored" data-anchor-id="normalisation">4. Normalisation</h2>
 <section id="affymetrix" class="level3">
 <h3 class="anchored" data-anchor-id="affymetrix">Affymetrix</h3>
-<p>RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the last step.</p>
+<p>RMA normalized and filtered to remove low-expressing genes.</p>
+<p>RMA: Robust Multiarray Average (Affymetrix arrays), this includes log2 at the last step. (If it is log-transformed: typically in the range of 0 to 16)</p>
 <p>AffyBatch -&gt; ExpressionSet</p>
 <ul>
-<li>Background correction</li>
-<li>Normalisation</li>
-<li>Summarisation</li>
+<li>Background correction: removal of background noise (probe pairs, a perfect match (PM), and single base mismatch (MM): Affymetrix’s own MAS5 algorithm):
+<ul>
+<li>RMA ALGORITHM ignores MM probes.</li>
+<li>gcrma algorithm: background depends on the GC content.</li>
+</ul></li>
+<li>Normalisation: quantile normalisation, data on a common empirical distribution
+<ul>
+<li>`normalize(set, method=‘quantile’, which=‘pm’)`</li>
+<li>`hist(oligo_set, lwd=2, xlab=‘log intensity’, which=‘pm’)`</li>
+</ul></li>
+<li>Summarisation
+<ul>
+<li>`rma(oligo_norm, background=FALSE, normalize=FALSE)`</li>
+<li>`histo(oligo_sum)`</li>
+</ul></li>
 </ul>
+</section>
+<section id="rma-in-r" class="level3">
+<h3 class="anchored" data-anchor-id="rma-in-r">RMA in R</h3>
+<p>`affy::rma()` - takes an AffyBatch object, returns an ExpressionSet</p>
+<p>`oligo::basicRMA()` - takes an ExpressionFeatureSet object</p>
+</section>
+<section id="exploring-expressionset" class="level3">
+<h3 class="anchored" data-anchor-id="exploring-expressionset">Exploring ExpressionSet</h3>
+<p><code>pData(GSE55851)[1:5,]# Data information or Phenotype data</code></p>
+<p><code>fData(GSE55851)</code> # Gene annotation</p>
+<p><code>exprs(GSE55851)[1,]</code>` # Expression data</p>
+<p><code>varLabels(GSE55851)</code>` # Metadata</p>
+<p>`GSE55851$supplementary_file`#Raw files</p>
+<p><code>annotation(GSE55851)</code>`# Chip information</p>
+<p><code>experimentData(GSE55851)</code>`#Experimental info</p>
+<p><code>featureData(GSE55851)</code>`#Probeset data</p>
+</section>
+<section id="affymetrix-1" class="level3">
+<h3 class="anchored" data-anchor-id="affymetrix-1">Affymetrix</h3>
+<p><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3902802/" class="uri">https://pmc.ncbi.nlm.nih.gov/articles/PMC3902802/</a></p>
+<p>Set of probes of 20bp for one gene</p>
+<p>CEL &gt; SOFT &gt; Matrix</p>
+</section>
+</section>
+<section id="tutorials" class="level2">
+<h2 class="anchored" data-anchor-id="tutorials">Tutorials</h2>
+<p>https://gtk-teaching.github.io/Microarrays-R/ https://github.com/wkzawadzka/bioanalysis/blob/master/microarrays/workflows/agilent/workflow.R https://github.com/NelleV/2019timecourse-rnaseq-pipeline/blob/e345b60679c6f24e02b54b63ab59c46e75d65481/scripts/miscellaneous/normalization.Rmd#L17</p>
+<section id="loading-packages" class="level3">
+<h3 class="anchored" data-anchor-id="loading-packages">1. Loading packages</h3>
+</section>
+<section id="scenario-a-assuming-everything-is-fine-data-normalized" class="level3">
+<h3 class="anchored" data-anchor-id="scenario-a-assuming-everything-is-fine-data-normalized">2. Scenario A: Assuming everything is fine (data normalized)</h3>
+<p>The affy package also has a list.celfiles() function (with a slightly different interface), and offers a read.AffyBatch() function to read celfiles. However, the affy package can only work with 3′ biased Affymetrix arrays, so oligo is preferred</p>
+<p>For Agilent files, important columns are typically: - gMedianSignal (foreground) - gBGMedianSignal (background) - gIsWellAboveBG (quality flag)</p>
+<p>ExpressionFeatureSet - Array GeneFeatureSet</p>
+<p>The function, rma() from the affy package takes in an AffyBatch object. The function basicRMA() from the oligo package takes in an ExpressionFeatureSet object.</p>
 </section>
 </section>
 <section id="linear-models" class="level2">
 <h2 class="anchored" data-anchor-id="linear-models">4. Linear models</h2>
 <p>Generate a model to specify the design and fit the model to the design.</p>
 <p><code>y ~ x + 0</code>: The “0” will remove the intercept.</p>
+<p>c(“XIST: 220729_s_at (Affymetrix Human Genome U133 Plus 2.0 Array) RPS4Y1: 205000_at KDM5D: 205038_at DDX3Y: 205040_at</p>
 </section>
 <section id="data-wrangling" class="level2">
 <h2 class="anchored" data-anchor-id="data-wrangling">5. Data wrangling</h2>
@@ -133,6 +267,10 @@ ul.task-list li input[type="checkbox"] {
 <li><p>(Repository in Spanish)[https://github.com/u-genoma/BioinfinvRepro]</p></li>
 <li><p>(Deeply explained)[https://gtk-teaching.github.io/Microarrays-R/]</p></li>
 </ul>
+<ol type="1">
+<li><p>Introduction to microarray analysis GSE15947, by Department of Statistics, Purdue Univrsity <a href="https://www.stat.purdue.edu/bigtap/online/docs/Introduction_to_Microarray_Analysis_GSE15947.html" class="uri">https://www.stat.purdue.edu/bigtap/online/docs/Introduction_to_Microarray_Analysis_GSE15947.html</a></p></li>
+<li><p>Mark Dunning, 2020, GEO tutorial, by Sheffield Bioinformatics Core <a href="https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html#Further_processing_and_visualisation_of_DE_results" class="uri">https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html#Further_processing_and_visualisation_of_DE_results</a></p></li>
+</ol>
 </section>
 </section>
 
