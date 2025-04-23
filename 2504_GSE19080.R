@@ -21,7 +21,7 @@ isLog2Transformed <- function(data) {
 
 # First obtain metadata
 id <- "GSE19080" # GPL4133
-
+id
 # creating a temp folder
 if (!dir.exists(paste0(".temp/", id))) {
     dir.create(paste0(".temp/", id))
@@ -29,16 +29,19 @@ if (!dir.exists(paste0(".temp/", id))) {
     message("Folder already exists!")
 }
 
-# Obtaining Metadata
-meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
+# Obtaining Metadata and expression
+meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp") #Matrix is not good. hence, we are just checking using it as a control after our normalisation
 meta <- meta[[1]]
 
-head(fData(meta))
-head(pData(meta))
+head(fData(meta)) #genes
+head(pData(meta)) #clinic
+head(exprs(meta)) #expression
 colnames(exprs(meta))
 dim(meta)
 
-# Metadata wrangling
+
+
+# Metadata clinic data wrangling
 pd <- pData(meta) |>
     tibble::rownames_to_column("ID") |>
     dplyr::select("characteristics_ch1", "characteristics_ch1.3", ID, supplementary_file) |>
@@ -55,8 +58,10 @@ pd <- pData(meta) |>
         str_detect(atl_subtype, "Healthy") ~ "HD",
         .default = NA
     ))
+pd
 
-## Download all the files in the .temp of this environment
+pd7=pd
+## Download all RAW files in the .temp of this environment
 for (i in 1:length(pd7$supplementary_file)) {
     url <- pd7$supplementary_file[i]
     destfile <- file.path(paste0(".temp/", id, "/", pd7$file[i]))
@@ -80,22 +85,26 @@ for (i in 1:length(pd7$supplementary_file)) {
 # Part 3: Capturing targets
 #--------------------------------------------------------
 # Exploring the structure of one file
-con <- gzfile(file.path("/Users/denriquez/Documents/GitHub/microarray_tutorial/.temp/GSE19080/GSM472372_HISH0553.txt.gz"))
-file_lines <- readLines(con, n=1000)
+con <- gzfile(file.path(".temp/GSE19080/GSM472356_HISH0317.txt.gz"))
+file_lines <- readLines(con, n=50)
 close(con)
+file_lines
 
 # Subsettting files (here we have two different platforms) 
 pd7 = pd |>
-    filter(ID%in%c(paste0("GSM4723", c(56:73, 82:93))))
+    filter(ID%in%c(paste0("GSM4723", c(56:73, 82:93)))) #here is sample from quantarray
 
 # Re-read the raw files, this was a quantarray (described in metadata)
-agilent_data <- read.maimages(
+agilent_data <- read.maimages(  
     files = file.path(".temp", id, pd7$file),
     source = "quantarray",
-    green.only = FALSE,
+    green.only = FALSE,  #due two colors
     names = pd7$ID,
     other.columns = list(
-        Flag = "Ignore Filter"))
+        Flag = "Ignore Filter")) #ignore filter, is control for that chip
+
+# agilent_data is the raw
+
 #--------------------------------------------------------
 # Part 4: Manipulating targets
 #--------------------------------------------------------
@@ -106,8 +115,9 @@ agilent_data$targets = agilent_data$targets |>
     as.data.frame() |>
     tibble::column_to_rownames("sampleName")
 
-#### gene Annotation
+#### gene Annotation extraction
 gpl2 <- getGEO("GPL9686")
+gpl2
 
 head(fData(meta)[,c("ID", "SYMBOL", "GENE_NAME", "GB_ACC")])
 annot <- Table(gpl2)[, c("SYMBOL", "GENE_NAME", "GB_ACC")]
@@ -118,7 +128,7 @@ agilent_data$genes <- agilent_data$genes |>
   dplyr::left_join(annot, by=c("Name"="GB_ACC")) |>
   mutate(is_control=factor(ifelse(is.na(SYMBOL) & is.na(GENE_NAME), "control", "gene")))
 
-table(agilent_data$gene$is_control)
+table(agilent_data$gene$is_control)  #knowing which of them are control samples
 
 #agilent_data$genes$GENE_SYMBOL <- annot$SYMBOL[match(agilent_data$genes$Name, annot$GB_ACC)]
 
@@ -127,7 +137,7 @@ table(agilent_data$genes$is_control)
 #--------------------------------------------------------
 # Part 5: QC
 #--------------------------------------------------------
-# (A) Use negative controls for background correction
+# (A) Use negative controls for background correction just function
 agilent_two_color_qc <- function(agilent_data,
                                 verbose = TRUE) {
     # 1. Input Validation --------------------------------------------------------
@@ -165,10 +175,10 @@ agilent_two_color_qc <- function(agilent_data,
     # 4. Background correction
     agilent_data <- limma::backgroundCorrect(agilent_data, method="normexp", offset=20) 
     # 5. Normalization
-    agilent_data <- limma::normalizeWithinArrays(agilent_data, method="loess")
+    agilent_data <- limma::normalizeWithinArrays(agilent_data, method="loess")  #two colors
     agilent_data <- limma::normalizeBetweenArrays(agilent_data, method="quantile")
 
-    # 6. technical replicates reduction by probename
+    # 6. technical replicates reduction by probename 
     agilent_data <- limma::avereps(agilent_data, ID=agilent_data$genes$Name)
     agilent_data <- agilent_data[agilent_data$genes$is_control=="gene", ]
     agilent_data <- limma::avereps(agilent_data, ID=agilent_data$genes$GENE_SYMBOL)
@@ -176,11 +186,11 @@ agilent_two_color_qc <- function(agilent_data,
     return(agilent_data)
 }
 
-## Apply the function to the data
+## Apply the normalisation function to the data 
 gse1 = agilent_two_color_qc(agilent_data)
 ##### PCA
 dim(gse1)
-boxplot(gse1$M, main="Normalized Negative Controls")
+boxplot(gse1$M, main="Normalized Negative Controls")  #sample must be in the middle
 
 pd7
 pca <- prcomp(t(gse1$M))
@@ -240,8 +250,8 @@ top_probes |>
     dplyr::select(-c(1:5, 8)) |>
     #dplyr::filter(GENE_SYMBOL =="ZNF856B") #|>
     dplyr::filter(SYMBOL %in% neg_tcr) |>
-    as_tibble() |>
-    arrange(desc(ATL_AC)) #|>
+    as_tibble() #|>
+    #arrange(desc(ATL_AC)) #|>
 
 datatable(probesx |>
     dplyr::select(-c(1:5, 7:8, 10:12)) |>
