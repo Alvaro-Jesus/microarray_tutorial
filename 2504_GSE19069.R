@@ -208,4 +208,4 @@ table(agilent_data$gene$is_control)
 
 table(agilent_data$genes$is_control)
 
-
+head(agilent_data)
