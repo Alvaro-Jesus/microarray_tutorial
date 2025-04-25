@@ -1,8 +1,8 @@
 #--------------------------------------------------------
-# Title: Microarray Data Analysis with GEOquery and limma
+# Title: Microarray Data Analysis with GEOquery and limma for one color
 
 
-#GSE65823 Reanalyzed by: GSE86362 GSE119087
+#
 
 #--------------------------------------------------------
 # Part 1: loading packages and functions
@@ -34,6 +34,13 @@ if (!dir.exists(paste0(".temp/", id))) {
 meta <- getGEO(id, GSEMatrix = TRUE, destdir = ".temp")
 meta <- meta[[1]]
 
+
+head(fData(meta)) #genes
+head(pData(meta)) #clinic
+head(exprs(meta)) #matrix gene expression
+colnames(exprs(meta))
+dim(meta)
+
 tail(pData(meta), 5)
 dim(meta)
 
@@ -63,6 +70,10 @@ pd <- pData(meta) |>
          str_detect(title, "Lymphoid") ~ "Lymph",
         .default = NA)) 
 
+#para aumentar el tiempo de respeusta de descarga
+options(timeout = max(300, getOption("timeout")))
+options(download.file.method.GEOquery = "curl")
+
 
 ## Download all the files in the .temp of this environment
 for (i in 1:length(pd$supplementary_file)) {
@@ -71,11 +82,11 @@ for (i in 1:length(pd$supplementary_file)) {
     # Download the file
     tryCatch(
         {
-            download.file(url, destfile, mode = "wb", method = "curl")
+            download.file(url, destfile, mode = "wb",method="curl") ### variar de protocolos
         },
         error = function(e) {
             # Fallback to default method if curl fails
-            download.file(url, destfile, mode = "wb")
+            download.file(url, destfile, mode = "wb") ###
         }
     )
     # Optional: Extract if it's a tar file
@@ -85,15 +96,25 @@ for (i in 1:length(pd$supplementary_file)) {
 }
 
 
+
+#pd|>
+filter(str_detect(pd$supplementary_file, "GSM472134.CEL.gz"))
+
+
+
+#urlx = "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM472nnn/GSM472135/suppl/GSM472135.CEL.gz"
+download.file(urlx, destfile= ".temp/GSM472135.CEL.gz", mode = "wb")
+
+
 #--------------------------------------------------------
 # Part 3: Capturing targets
 #--------------------------------------------------------
 # Exploring the structure of one file
-con <- gzfile(file.path("XXX"))
+con <- gzfile(file.path(".temp/GSE19069/GSM472023.CEL.gz"))
 file_lines <- readLines(con, n=1000)
 close(con)
-
-# Subsettting files (here we have two different platforms) 
+head(file_lines)
+# Subsettting files 
 table(pd$ptcl)
 
 PTCL = c("ALKneg", "ALKpos", "ATL", "CD4a", "AITL", "PTCL")
@@ -101,20 +122,26 @@ PTCL = c("ALKneg", "ALKpos", "ATL", "CD4a", "AITL", "PTCL")
 pd7 = pd |>
     filter(ptcl%in%PTCL) 
     
-dim(pd7)
+head(pd7)
+
+(pd7)[,7]
 
 #### gene Annotation
 gpl2 <- getGEO("GPL570")
+head(Table(gpl2))
+
 annot <- Table(gpl2)[,c("ID", "GB_ACC", "Gene Symbol", "Gene Title", "ENTREZ_GENE_ID")] #|>
     tibble::column_to_rownames("ID")
 
-# Re-read the raw files, this was a quantarray (described in metadata)
+# Re-read the raw files  ---- Error: the following are not valid files: .temp/GSE19069/GSM472041.CEL.gz (probably compressed)
 affy_data = ReadAffy(
     filenames=pd7$file,
     sampleNames = pd7$ID,
     celfile.path = file.path(".temp", id)
 )
 
+
+## QC y Normalisation?
 affy_rma = rma(affy_data)
 
 methods(class=class(affy_data))
@@ -180,3 +207,5 @@ table(agilent_data$gene$is_control)
 #agilent_data$genes$GENE_SYMBOL <- annot$SYMBOL[match(agilent_data$genes$Name, annot$GB_ACC)]
 
 table(agilent_data$genes$is_control)
+
+

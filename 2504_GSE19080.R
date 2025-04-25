@@ -202,7 +202,7 @@ pca |>
     dplyr::left_join(pd7, by="ID") |> 
     tidyplots::tidyplot(x=PC1, y=PC2, color=atl_subtype) |>
     tidyplots::add_data_points()
-
+pca
 #--------------------------------------------------------
 # Part 6: DE
 #--------------------------------------------------------
