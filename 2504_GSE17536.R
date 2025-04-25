@@ -120,17 +120,33 @@ affy_data = ReadAffy(
 
 
 
+## QC pre normalización?
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("affyQCReport")  # Instalar desde Bioconductor
+
+BiocManager::install("affyQCReport")
+
+affyQCReport(affy_data, destdir = "QC_AffyReport")
+
+
 ## Normalisation?
 affy_rma = rma(affy_data)
 methods(class=class(affy_data))
 protocolData(affy_data)
 
 
-head(exprs(affy_data))
+head(exprs(affy_rma))
 getwd()
+
 ## QC con html
 pacman::p_load(arrayQualityMetrics)
 arrayQualityMetrics(affy_rma, outdir = "QC_Report")
+
+
+
+
 
 
 
